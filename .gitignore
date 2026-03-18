@@ -1,0 +1,29 @@
+# 环境变量与凭证
+.env
+.feishu_calendar_id
+
+# 安装的 Agent Skills（依赖，不提交）
+.agents/
+.claude/
+
+# 运行时数据（不提交）
+.message_cache.db
+.p2p_chat_ids.json
+.pending_events.json
+.pending_summaries.json
+.space_mappings.json
+skills-lock.json
+
+# 输出目录
+output/
+
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.venv/
+venv/

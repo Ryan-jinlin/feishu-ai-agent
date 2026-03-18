@@ -1,0 +1,12 @@
+fastapi>=0.95.0
+uvicorn>=0.22.0
+anthropic>=0.34.0
+requests>=2.31.0
+python-dotenv>=1.0.0
+pytz>=2024.1
+apscheduler>=3.10.4
+lark-oapi>=1.3.0
+pycryptodome>=3.18.0
+python-pptx>=1.0.0
+# feishu-sync 需从内网源安装：
+# pip install --extra-index-url https://artifactory.momenta.works/artifactory/api/pypi/pypi-momenta/simple feishu-sync -U
