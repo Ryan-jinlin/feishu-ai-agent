@@ -246,8 +246,9 @@ TOOL_DEFINITIONS = [
         "description": (
             "取消（删除）已创建的飞书日历会议，并向与会者发送取消通知。\n"
             "方式一：提供 event_id + calendar_id（最精准，来自 create_meeting 返回结果）。\n"
-            "方式二：提供 title 关键词（系统自动在近期会议中搜索匹配，无需 event_id）。\n"
-            "两种方式至少提供一种。\n"
+            "方式二：提供 title 关键词（系统自动在近期会议中搜索匹配）。\n"
+            "方式三：event_id 和 title 均不填，系统列出所有待处理会议供用户选择——"
+            "**用户只说「取消会议」而未指明是哪个时，直接调用此工具（不填任何参数）即可。**\n"
             "当用户说「取消所有」或「全部取消」时，设置 cancel_all=true，直接取消所有匹配会议无需二次确认。\n"
             "当 tool 返回多个匹配并附带 event_id+calendar_id 时，再次调用本工具并传入对应值即可精确取消。"
         ),
@@ -1064,7 +1065,26 @@ class ToolExecutor:
                 f"找到 {len(events)} 个匹配的会议，请告诉我取消哪个（或说「全部取消」）：\n{lines}"
             )
 
-        return "请提供 event_id 或会议标题（title）才能取消会议。"
+        # ── 情况 3：无任何条件，列出所有待处理会议供用户选择 ──────────
+        if _PENDING_EVENTS:
+            lines = "\n".join(
+                f"- {info.get('title', '(无标题)')}（event_id={eid}）"
+                for eid, info in _PENDING_EVENTS.items()
+            )
+            return f"当前待处理会议如下，请告诉我取消哪个（或说「全部取消」）：\n{lines}"
+        # 持久化记录为空，查询日历 API（近 30 天）
+        now = datetime.now(TZ_SHANGHAI)
+        events = self.feishu.list_calendar_events(
+            time_min=now - timedelta(days=1),
+            time_max=now + timedelta(days=30),
+        )
+        if not events:
+            return "近期日历中未找到你创建的会议。"
+        lines = "\n".join(
+            f"- {e['title']}（{e.get('start', '')}，event_id={e['event_id']}）"
+            for e in events
+        )
+        return f"找到以下近期会议，请告诉我取消哪个（或说「全部取消」）：\n{lines}"
 
     def _do_cancel(
         self,
