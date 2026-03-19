@@ -207,8 +207,11 @@ class FeishuClient:
             if time.time() - self._user_cache_ts > self._USER_CACHE_TTL:
                 import threading as _threading
                 _threading.Thread(target=self._warm_user_cache, daemon=True).start()
-            kw = keyword.lower()
-            results = [u for u in self._user_cache if kw in u["name"].lower()]
+            def _norm(s: str) -> str:
+                """去掉全角/半角空格，转小写，便于模糊匹配"""
+                return s.replace('\u3000', '').replace(' ', '').lower()
+            kw = _norm(keyword)
+            results = [u for u in self._user_cache if kw in _norm(u["name"]) or kw in _norm(u.get("en_name", ""))]
             return results[:page_size]
 
         # 2. 缓存未就绪，回退到实时遍历（速度较慢，仅启动后首次调用）
@@ -255,6 +258,7 @@ class FeishuClient:
                         seen.add(oid)
                         all_users.append({
                             "name": u.get("name", ""),
+                            "en_name": u.get("en_name", ""),
                             "open_id": oid,
                             "email": u.get("email", ""),
                         })
@@ -286,7 +290,9 @@ class FeishuClient:
 
     def _search_users_by_contact(self, keyword: str, page_size: int) -> list[dict]:
         """用 Contact API（tenant token）遍历部门树，按名字关键词过滤用户"""
-        keyword_lower = keyword.lower()
+        def _norm(s: str) -> str:
+            return s.replace('\u3000', '').replace(' ', '').lower()
+        kw = _norm(keyword)
         found: list[dict] = []
         seen_open_ids: set[str] = set()
 
@@ -311,13 +317,15 @@ class FeishuClient:
                     break
                 for u in data.get("data", {}).get("items", []):
                     name = u.get("name", "")
+                    en_name = u.get("en_name", "")
                     oid = u.get("open_id", "")
                     if oid in seen_open_ids:
                         continue
-                    if keyword_lower in name.lower():
+                    if kw in _norm(name) or kw in _norm(en_name):
                         seen_open_ids.add(oid)
                         found.append({
                             "name": name,
+                            "en_name": en_name,
                             "open_id": oid,
                             "email": u.get("email", ""),
                             "department": "",
