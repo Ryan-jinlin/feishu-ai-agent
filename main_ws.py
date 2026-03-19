@@ -377,19 +377,41 @@ def _check_rsvp_changes() -> None:
 
 
 # ------------------------------------------------------------------ #
+# feishu-sync token 预热（避免 access token 过期时首次请求失败）
+# ------------------------------------------------------------------ #
+
+def _warmup_feishu_token() -> None:
+    """调用一次轻量 feishu-sync-cli 操作，触发 access token 自动刷新。
+    access token 有效期约 2 小时，每 90 分钟主动预热一次即可保持不过期。"""
+    try:
+        result = executor._run_feishu_cli("list_spaces", timeout=20)
+        if result and not result.startswith("[错误]") and not result.startswith("[飞书工具"):
+            logger.info("feishu-sync token 预热成功")
+        else:
+            logger.warning("feishu-sync token 预热异常: %s", (result or "")[:100])
+    except Exception as e:
+        logger.warning("feishu-sync token 预热失败（非致命）: %s", e)
+
+
+# ------------------------------------------------------------------ #
 # 启动
 # ------------------------------------------------------------------ #
 
 if __name__ == "__main__":
     logger.info("个人助理机器人启动（长连接模式）")
 
-    # RSVP 轮询定时任务（每 5 分钟）+ 每日摘要（每天 00:00:05）
+    # RSVP 轮询定时任务（每 5 分钟）+ 每日摘要（每天 00:00:05）+ token 预热（每 90 分钟）
     scheduler = BackgroundScheduler(timezone="Asia/Shanghai")
     scheduler.add_job(_check_rsvp_changes, "interval", minutes=5, id="rsvp_check")
     scheduler.add_job(daily_summary.run, "cron", hour=0, minute=0, second=5, id="daily_summary")
+    scheduler.add_job(_warmup_feishu_token, "interval", minutes=90, id="token_warmup")
     scheduler.start()
     logger.info("RSVP 轮询任务已启动（每 5 分钟）")
     logger.info("每日摘要任务已启动（每天 00:00:05）")
+    logger.info("feishu-sync token 预热任务已启动（每 90 分钟）")
+
+    # 启动时立即预热一次（后台执行，不阻塞 WS 启动）
+    threading.Thread(target=_warmup_feishu_token, daemon=True, name="token-warmup-init").start()
 
     event_handler = (
         lark.EventDispatcherHandler.builder("", "")
