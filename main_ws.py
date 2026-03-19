@@ -77,34 +77,49 @@ _MAX_DEDUP = 1000
 # 事件处理
 # ------------------------------------------------------------------ #
 
+def _extract_post_body(lang_body: dict) -> str:
+    """从单个语言体 {"title":..., "content":[[...],...]} 提取纯文本"""
+    parts: list[str] = []
+    title = lang_body.get("title", "")
+    if title:
+        parts.append(title)
+    for paragraph in lang_body.get("content", []):
+        for elem in paragraph:
+            tag = elem.get("tag", "")
+            if tag == "text":
+                parts.append(elem.get("text", ""))
+            elif tag == "a":
+                href = elem.get("href", "")
+                text = elem.get("text", "")
+                # 把链接文本和 URL 都保留，让 Claude 能看到 URL
+                if href and text and href != text:
+                    parts.append(f"{text}（{href}）")
+                elif href:
+                    parts.append(href)
+                else:
+                    parts.append(text)
+            elif tag == "at":
+                parts.append(elem.get("user_name", ""))
+    return "".join(parts)
+
+
 def _extract_post_text(content: dict) -> str:
-    """从飞书 post 消息 JSON 中提取纯文本（含超链接 URL，便于 Claude 拿到飞书文档链接）"""
+    """从飞书 post 消息 JSON 中提取纯文本（含超链接 URL，便于 Claude 拿到飞书文档链接）。
+    支持两种格式：
+    - 语言包裹格式：{"zh_cn": {"title": "", "content": [...]}}
+    - 直接格式：{"title": "", "content": [...]}（部分客户端发出）
+    """
+    # 优先尝试语言包裹格式
     for lang in ("zh_cn", "en_us", "ja_jp"):
         lang_body = content.get(lang, {})
         if not lang_body:
             continue
-        parts: list[str] = []
-        title = lang_body.get("title", "")
-        if title:
-            parts.append(title)
-        for paragraph in lang_body.get("content", []):
-            for elem in paragraph:
-                tag = elem.get("tag", "")
-                if tag == "text":
-                    parts.append(elem.get("text", ""))
-                elif tag == "a":
-                    href = elem.get("href", "")
-                    text = elem.get("text", "")
-                    # 把链接文本和 URL 都保留，让 Claude 能看到 URL
-                    if href and text and href != text:
-                        parts.append(f"{text}（{href}）")
-                    elif href:
-                        parts.append(href)
-                    else:
-                        parts.append(text)
-                elif tag == "at":
-                    parts.append(elem.get("user_name", ""))
-        return "".join(parts)
+        result = _extract_post_body(lang_body)
+        if result:
+            return result
+    # 回退：直接格式（content key 在顶层）
+    if "content" in content:
+        return _extract_post_body(content)
     return ""
 
 
@@ -128,6 +143,9 @@ def _parse_message(data: P2ImMessageReceiveV1) -> BotMessage | None:
             raw_text = _extract_post_text(content)
         else:
             raw_text = content.get("text", "")
+
+        if not raw_text.strip():
+            logger.warning("消息文本解析为空，type=%s content=%s", message.message_type, content_str[:500])
 
         # 解析 @mentions
         mentions: list[MentionedUser] = []
