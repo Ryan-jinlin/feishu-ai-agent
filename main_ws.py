@@ -400,14 +400,22 @@ def _check_rsvp_changes() -> None:
 # ------------------------------------------------------------------ #
 
 def _warmup_feishu_token() -> None:
-    """调用一次轻量 feishu-sync-cli 操作，触发 access token 自动刷新。
-    access token 有效期约 2 小时，每 90 分钟主动预热一次即可保持不过期。"""
+    """直接调用 feishu_sync.retoken.get_access_token() 强制刷新 access token。
+    不走 feishu-sync-cli 命令（该命令在 list_spaces 有缓存时会跳过 token exchange）。
+    access token 有效期 2 小时，每 90 分钟预热一次确保不过期。"""
+    import subprocess as _sp, sys as _sys
     try:
-        result = executor._run_feishu_cli("list_spaces", timeout=20)
-        if result and not result.startswith("[错误]") and not result.startswith("[飞书工具"):
-            logger.info("feishu-sync token 预热成功")
+        r = _sp.run(
+            [_sys.executable, "-c",
+             "from feishu_sync.retoken import get_access_token; "
+             "_, ttl = get_access_token(); print(ttl)"],
+            capture_output=True, text=True, timeout=20,
+        )
+        if r.returncode == 0:
+            ttl = r.stdout.strip()
+            logger.info("feishu-sync token 预热成功，access token TTL: %ss", ttl)
         else:
-            logger.warning("feishu-sync token 预热异常: %s", (result or "")[:100])
+            logger.warning("feishu-sync token 预热异常: %s", (r.stderr or r.stdout)[:200])
     except Exception as e:
         logger.warning("feishu-sync token 预热失败（非致命）: %s", e)
 

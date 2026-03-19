@@ -1396,7 +1396,7 @@ class ToolExecutor:
 
                 # stdout 含实际错误，stderr 含 INFO 日志；优先 stdout
                 err = (result.stdout or result.stderr or "").strip()
-                logger.warning("feishu-sync-cli 返回非零（第%d次）: %s", attempt + 1, err[:300])
+                logger.warning("feishu-sync-cli 返回非零（第%d次）: %s", attempt + 1, err[:1000])
 
                 # 识别已知静态错误（无需重试）
                 if "Document type 'file' is not supported" in err or \
