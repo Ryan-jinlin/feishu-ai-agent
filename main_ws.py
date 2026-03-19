@@ -380,12 +380,13 @@ def _check_rsvp_changes() -> None:
                 info["attendees"][oid] = rsvp
                 _save_pending_events()
                 logger.info("RSVP 变化: event=%s user=%s %s→%s", event_id, oid, old_rsvp, rsvp)
-                if rsvp == "decline" and info.get("owner_open_id"):
-                    # 查找拒绝者姓名
+                owner_oid = info.get("owner_open_id", "")
+                if rsvp == "decline" and owner_oid and oid != owner_oid:
+                    # 查找拒绝者姓名（owner 拒绝自己的会议时不通知）
                     user_info = feishu.get_user_by_open_id(oid)
                     name = user_info.get("name", oid) if user_info else oid
                     feishu.send_text_to_user(
-                        info["owner_open_id"],
+                        owner_oid,
                         f"【会议提醒】{name} 拒绝了会议邀请\n"
                         f"会议：{info['title']}\n"
                         f"如需重新安排，请告诉我新的时间。",
