@@ -312,16 +312,6 @@ def do_p2_im_message_receive_v1(data: P2ImMessageReceiveV1) -> None:
             feishu.reply_message(msg.message_id, "已清除对话历史，下一条消息将开始全新对话。")
             return
 
-        # 每日摘要确认指令（仅限 owner）
-        _confirm_triggers = ("确认群摘要", "群摘要确认")
-        if any(msg.clean_text.strip().startswith(t) for t in _confirm_triggers):
-            if owner_open_id and msg.sender_open_id != owner_open_id:
-                feishu.reply_message(msg.message_id, "该指令仅限 Bot 管理员使用。")
-                return
-            reply = daily_summary.handle_confirm(msg.clean_text.strip())
-            feishu.reply_message(msg.message_id, reply or "未识别的确认指令，请使用：确认群摘要 [群名]")
-            return
-
         # 空消息忽略
         if not msg.clean_text.strip():
             return
