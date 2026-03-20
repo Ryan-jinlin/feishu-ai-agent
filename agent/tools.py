@@ -804,6 +804,51 @@ TOOL_DEFINITIONS = [
         },
     },
     {
+        "name": "debate",
+        "description": (
+            "让两个 AI 角色就某个话题进行多轮辩论/互相校验，生成结构化的讨论报告。\n"
+            "适合场景：方案评审、决策校验、风险分析、技术方案对比、头脑风暴。\n"
+            "流程：Agent A 分析 → Agent B 审查/质疑 → A 回应（可多轮）→ 仲裁者总结共识与结论。\n"
+            "两个角色可以自定义，例如：'产品经理' vs '工程师'、'乐观派' vs '悲观派'、'支持方' vs '反对方'。\n"
+            "结果可选择直接发送到飞书群（填 output_chat_id）。"
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "topic": {
+                    "type": "string",
+                    "description": "辩论/讨论的核心话题或问题，尽量具体",
+                },
+                "context": {
+                    "type": "string",
+                    "description": "背景信息（可选），如相关文档内容、数据、已知条件等",
+                    "default": "",
+                },
+                "persona_a": {
+                    "type": "string",
+                    "description": "Agent A 的角色描述（可选，默认：资深分析师）。例如：'产品经理，关注用户价值和市场落地'",
+                    "default": "",
+                },
+                "persona_b": {
+                    "type": "string",
+                    "description": "Agent B 的角色描述（可选，默认：批判性审查者）。例如：'资深工程师，关注技术可行性和实现成本'",
+                    "default": "",
+                },
+                "rounds": {
+                    "type": "integer",
+                    "description": "辩论轮数（1-3，默认 2）。1轮适合快速校验，2-3轮适合深度讨论",
+                    "default": 2,
+                },
+                "output_chat_id": {
+                    "type": "string",
+                    "description": "将完整讨论报告发到指定飞书群（可选，填 chat_id；可先用 feishu_action list_groups 获取）",
+                    "default": "",
+                },
+            },
+            "required": ["topic"],
+        },
+    },
+    {
         "name": "find_skills",
         "description": (
             "搜索 Agent Skill 推荐。当用户想找某类功能的 skill、问「有没有能做 X 的工具/skill」时使用。"
@@ -871,6 +916,8 @@ class ToolExecutor:
             return self._feishu_project(**tool_input)
         if tool_name == "search_gb_standard":
             return self._search_gb_standard(**tool_input)
+        if tool_name == "debate":
+            return self._debate(**tool_input)
         if tool_name == "find_skills":
             return self._find_skills(**tool_input)
         return f"未知工具: {tool_name}"
@@ -2612,6 +2659,113 @@ class ToolExecutor:
             lines.append("\n[...结果过多，已截断。请使用更精确的关键词缩小范围...]")
 
         return f"## {doc_name} 搜索结果（关键词：{query}）\n\n" + "\n".join(lines)
+
+    # ── AI 多角色辩论 ──────────────────────────────────────────────
+
+    def _debate(
+        self,
+        topic: str,
+        context: str = "",
+        persona_a: str = "",
+        persona_b: str = "",
+        rounds: int = 2,
+        output_chat_id: str = "",
+    ) -> str:
+        """两个 AI 角色交替辩论，第三个角色总结结论。"""
+        import anthropic as _anthropic
+        import os as _os
+
+        rounds = max(1, min(3, int(rounds)))
+
+        sys_a = (
+            f"你是{persona_a}。" if persona_a
+            else "你是一位资深分析师，善于从多维度深入分析问题，给出全面、有深度的见解。"
+        )
+        sys_b = (
+            f"你是{persona_b}。" if persona_b
+            else "你是一位批判性思维专家，擅长发现方案漏洞、指出被忽视的风险，并提出建设性的改进意见。"
+        )
+        tone = "\n请用中文回答，控制在 300 字以内，观点清晰有重点，不要泛泛而谈。"
+
+        _client = _anthropic.Anthropic(api_key=_os.environ.get("ANTHROPIC_API_KEY", ""))
+        _model = "claude-sonnet-4-6"
+
+        def _call(system: str, messages: list) -> str:
+            resp = _client.messages.create(
+                model=_model,
+                max_tokens=1024,
+                system=system + tone,
+                messages=messages,
+            )
+            return "".join(b.text for b in resp.content if hasattr(b, "text")).strip()
+
+        # 构建初始问题
+        initial = f"话题：{topic}"
+        if context:
+            initial += f"\n\n背景信息：\n{context}"
+
+        transcript: list[tuple[str, str]] = []  # (role_label, content)
+        label_a = persona_a.split("，")[0] if persona_a else "分析师"
+        label_b = persona_b.split("，")[0] if persona_b else "审查者"
+
+        # Agent A 的对话历史
+        msgs_a: list[dict] = [{"role": "user", "content": initial}]
+        # Agent B 的对话历史（每轮重建）
+        msgs_b: list[dict] = []
+
+        for r in range(rounds):
+            # ── Agent A 发言 ──
+            text_a = _call(sys_a, msgs_a)
+            transcript.append((label_a, text_a))
+            msgs_a.append({"role": "assistant", "content": text_a})
+
+            # ── Agent B 发言 ──
+            if not msgs_b:
+                msgs_b = [{"role": "user", "content": f"{initial}\n\n{label_a}的分析：\n{text_a}"}]
+            else:
+                msgs_b.append({"role": "user", "content": f"{label_a}的最新回应：\n{text_a}"})
+            text_b = _call(sys_b, msgs_b)
+            transcript.append((label_b, text_b))
+            msgs_b.append({"role": "assistant", "content": text_b})
+
+            # A 下一轮看到 B 的质疑
+            if r < rounds - 1:
+                msgs_a.append({
+                    "role": "user",
+                    "content": f"{label_b}的质疑：\n{text_b}\n\n请回应上述观点并进一步完善你的分析。",
+                })
+
+        # ── 仲裁者总结 ──
+        debate_text = "\n\n".join(f"【{role}】\n{content}" for role, content in transcript)
+        arbiter_prompt = (
+            f"以下是关于「{topic}」的讨论记录：\n\n{debate_text}\n\n"
+            "请：\n"
+            "1. 用 1-2 句话概括双方的核心分歧\n"
+            "2. 列出 3-5 条具体可执行的结论/建议（编号列表）\n"
+            "3. 指出最需要关注的 1-2 个风险点\n"
+            "格式清晰，控制在 400 字以内，用中文。"
+        )
+        conclusion = _call(
+            "你是一位专业的讨论主持人，擅长总结多方观点、提炼共识、给出可执行建议。",
+            [{"role": "user", "content": arbiter_prompt}],
+        )
+
+        # ── 格式化报告 ──
+        lines = [f"**AI 多角色讨论：{topic}**\n"]
+        for i, (role, content) in enumerate(transcript):
+            round_num = i // 2 + 1
+            marker = "▶" if role == label_a else "◀"
+            lines.append(f"{marker} 第{round_num}轮 [{role}]\n{content}\n")
+        lines.append(f"📋 综合结论\n{conclusion}")
+        report = "\n".join(lines)
+
+        if output_chat_id:
+            try:
+                self.feishu.send_text_to_chat(output_chat_id, report)
+                return report + f"\n\n[已发送至群聊]"
+            except Exception as e:
+                return report + f"\n\n[发送群聊失败：{e}]"
+        return report
 
     # ── Skill 搜索 ─────────────────────────────────────────────────
 
