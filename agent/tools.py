@@ -164,7 +164,11 @@ TOOL_DEFINITIONS = [
             "会议创建成功后返回日历链接和会议信息。\n"
             "支持将部分与会者标记为 Optional（可选参加），在 optional_attendee_open_ids 中填写。\n"
             "外部用户（非本公司飞书账号）无法通过 search_users 查到 open_id，"
-            "请将其邮箱地址填入 attendee_emails，系统会以第三方方式邀请。"
+            "请将其邮箱地址填入 attendee_emails，系统会以第三方方式邀请。\n"
+            "【重要】如果与会者来自跨公司飞书群（外部用户），"
+            "请在调用本工具之前先一次性询问用户所有外部成员的邮箱，"
+            "不要创建会议后再逐个询问。"
+            "例如：\"我看到群里有几位外部成员，请一次提供他们的邮箱地址（多个可用逗号或换行分隔）\"。"
         ),
         "input_schema": {
             "type": "object",
@@ -1020,9 +1024,12 @@ class ToolExecutor:
         im_note = "已向内部受邀者发送飞书消息通知，将实时追踪回复状态。" if all_ids else ""
         # 外部/跨租户用户无法通过 open_id 邀请，提示 Claude 询问邮箱
         failed_note = (
-            f"\n⚠️ 以下 {len(failed_oids)} 名与会者未被日历接受（很可能是外部/跨租户用户，"
-            f"open_id 无效于日历邀请）：{failed_oids}\n"
-            "请向用户询问他们的邮箱，然后用 attendee_emails 参数重新调用 create_meeting 邀请。"
+            f"\n⚠️ {len(failed_oids)} 名与会者被日历系统静默拒绝（跨公司/外部飞书用户无法通过 open_id 邀请）。\n"
+            f"请**在一条消息中**列出这 {len(failed_oids)} 人的姓名，一次性请用户提供他们所有人的邮箱地址，"
+            f"不要逐一询问（例如：\"以下参会者是外部用户，请一次提供所有邮箱：[姓名1]、[姓名2]...\"）。\n"
+            f"收到全部邮箱后，用 attendee_emails=[...邮箱列表...] 重新调用 create_meeting，"
+            f"同时在 attendee_open_ids 中仅保留本次成功添加的内部用户。\n"
+            f"未添加的 open_ids: {failed_oids}"
         ) if failed_oids else ""
         return (
             f"会议已创建成功！\n"
