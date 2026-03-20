@@ -976,7 +976,7 @@ class ToolExecutor:
 
         # Step 2: 通过 /attendees API 发送正式日历邀请（含 optional 标记）
         all_ids = list(attendee_open_ids) + [oid for oid in optional_ids if oid not in attendee_open_ids]
-        invite_ok = self.feishu.add_event_attendees(
+        invite_ok, failed_oids = self.feishu.add_event_attendees(
             calendar_id, event_id, attendee_open_ids,
             optional_open_ids=optional_ids,
             attendee_emails=ext_emails,
@@ -1018,6 +1018,12 @@ class ToolExecutor:
         optional_note = f"\n可选参与者（Optional）：{len(optional_ids)} 人" if optional_ids else ""
         ext_note = f"\n外部用户（邮件邀请）：{', '.join(ext_emails)}" if ext_emails else ""
         im_note = "已向内部受邀者发送飞书消息通知，将实时追踪回复状态。" if all_ids else ""
+        # 外部/跨租户用户无法通过 open_id 邀请，提示 Claude 询问邮箱
+        failed_note = (
+            f"\n⚠️ 以下 {len(failed_oids)} 名与会者未被日历接受（很可能是外部/跨租户用户，"
+            f"open_id 无效于日历邀请）：{failed_oids}\n"
+            "请向用户询问他们的邮箱，然后用 attendee_emails 参数重新调用 create_meeting 邀请。"
+        ) if failed_oids else ""
         return (
             f"会议已创建成功！\n"
             f"标题：{title}\n"
@@ -1025,7 +1031,8 @@ class ToolExecutor:
             f"地点：{location or '未设置'}\n"
             f"必选与会人数：{len(attendee_open_ids)} 人{optional_note}{ext_note}\n"
             f"{invite_note}\n"
-            f"{im_note}\n"
+            f"{im_note}"
+            f"{failed_note}\n"
             f"[event_id={event_id} calendar_id={calendar_id}]"
         )
 

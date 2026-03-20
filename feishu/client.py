@@ -775,14 +775,16 @@ class FeishuClient:
         attendee_open_ids: list[str],
         optional_open_ids: list[str] | None = None,
         attendee_emails: list[str] | None = None,
-    ) -> bool:
+    ) -> tuple[bool, list[str]]:
         """通过 /attendees API 向日历事件添加与会者并发送正式邀请。
         内部用户用 open_id（type=user），外部用户用 email（type=third_party）。
-        分两次调用：必选与会者一次，可选（optional）与会者单独一次（失败则降级为普通成员）。
+        返回 (overall_ok, failed_open_ids)：failed_open_ids 是提交但未被接受的 open_id
+        列表，通常代表外部/跨租户用户，需改用 attendee_emails 邀请。
         """
-        def _post_attendees(entries: list[dict]) -> bool:
+        def _post_attendees(entries: list[dict]) -> tuple[bool, set[str]]:
+            """提交与会者，返回 (ok, 实际被添加的 open_id 集合)"""
             if not entries:
-                return True
+                return True, set()
             try:
                 resp = requests.post(
                     f"{FEISHU_HOST}/open-apis/calendar/v4/calendars/{calendar_id}/events/{event_id}/attendees",
@@ -795,34 +797,50 @@ class FeishuClient:
                 data = resp.json()
                 if data.get("code") != 0:
                     logger.error("添加与会者失败: %s", data)
-                    return False
-                return True
+                    return False, set()
+                added = {
+                    a.get("user_id", "")
+                    for a in data.get("data", {}).get("attendees", [])
+                    if a.get("type") == "user" and a.get("user_id")
+                }
+                return True, added
             except Exception as e:
                 logger.error("添加与会者异常: %s", e)
-                return False
+                return False, set()
 
         # Step 1: 必选与会者（内部用户）
-        required_entries = [{"type": "user", "user_id": oid} for oid in attendee_open_ids]
-        ok = _post_attendees(required_entries)
+        submitted_ids = set(attendee_open_ids)
+        ok, added_required = _post_attendees(
+            [{"type": "user", "user_id": oid} for oid in attendee_open_ids]
+        )
+        failed_open_ids = [oid for oid in attendee_open_ids if oid not in added_required]
+        if failed_open_ids:
+            logger.warning("以下 open_id 未被日历 API 接受（可能是外部/跨租户用户）: %s",
+                           failed_open_ids)
 
         # Step 2: 外部用户（third_party 类型，通过邮件收到日历邀请）
         ext_emails = [e.strip() for e in (attendee_emails or []) if e.strip()]
         if ext_emails:
-            ext_entries = [{"type": "third_party", "third_party_email": email} for email in ext_emails]
-            if not _post_attendees(ext_entries):
-                logger.warning("外部用户邀请失败，邮件列表: %s", ext_emails)
+            ext_ok, _ = _post_attendees(
+                [{"type": "third_party", "third_party_email": email} for email in ext_emails]
+            )
+            if not ext_ok:
+                logger.warning("外部用户邮件邀请失败，邮件列表: %s", ext_emails)
 
         # Step 3: 可选与会者（带 is_optional: True，失败则降级为普通成员）
-        opt_ids = [oid for oid in (optional_open_ids or []) if oid not in set(attendee_open_ids)]
+        opt_ids = [oid for oid in (optional_open_ids or []) if oid not in submitted_ids]
         if opt_ids:
-            opt_entries_with_flag = [{"type": "user", "user_id": oid, "is_optional": True} for oid in opt_ids]
-            if not _post_attendees(opt_entries_with_flag):
+            opt_ok, _ = _post_attendees(
+                [{"type": "user", "user_id": oid, "is_optional": True} for oid in opt_ids]
+            )
+            if not opt_ok:
                 logger.warning("is_optional 标记失败，降级为普通成员再次添加")
                 _post_attendees([{"type": "user", "user_id": oid} for oid in opt_ids])
 
-        logger.info("与会者邀请已发送: event=%s, 内部 %d 人, 外部邮件 %d 人, 可选 %d 人",
-                    event_id, len(attendee_open_ids), len(ext_emails), len(opt_ids))
-        return ok
+        logger.info("与会者邀请已发送: event=%s, 内部 %d 人, 外部邮件 %d 人, 可选 %d 人, 未接受 %d 人",
+                    event_id, len(attendee_open_ids), len(ext_emails), len(opt_ids),
+                    len(failed_open_ids))
+        return ok, failed_open_ids
 
     def get_event_attendees(self, calendar_id: str, event_id: str) -> list[dict]:
         """获取日历事件与会者列表及 RSVP 状态（用于轮询拒绝通知）。"""
