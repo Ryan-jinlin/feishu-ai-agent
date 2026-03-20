@@ -7,6 +7,8 @@
 .claude/
 
 # 运行时数据（不提交）
+.bot.pid
+.user_im_token.json
 .message_cache.db
 .p2p_chat_ids.json
 .pending_events.json
