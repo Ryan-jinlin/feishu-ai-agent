@@ -774,8 +774,10 @@ class FeishuClient:
         event_id: str,
         attendee_open_ids: list[str],
         optional_open_ids: list[str] | None = None,
+        attendee_emails: list[str] | None = None,
     ) -> bool:
         """通过 /attendees API 向日历事件添加与会者并发送正式邀请。
+        内部用户用 open_id（type=user），外部用户用 email（type=third_party）。
         分两次调用：必选与会者一次，可选（optional）与会者单独一次（失败则降级为普通成员）。
         """
         def _post_attendees(entries: list[dict]) -> bool:
@@ -799,11 +801,18 @@ class FeishuClient:
                 logger.error("添加与会者异常: %s", e)
                 return False
 
-        # Step 1: 必选与会者（标准调用，不带 is_optional）
+        # Step 1: 必选与会者（内部用户）
         required_entries = [{"type": "user", "user_id": oid} for oid in attendee_open_ids]
         ok = _post_attendees(required_entries)
 
-        # Step 2: 可选与会者（带 is_optional: True，失败则降级为普通成员）
+        # Step 2: 外部用户（third_party 类型，通过邮件收到日历邀请）
+        ext_emails = [e.strip() for e in (attendee_emails or []) if e.strip()]
+        if ext_emails:
+            ext_entries = [{"type": "third_party", "third_party_email": email} for email in ext_emails]
+            if not _post_attendees(ext_entries):
+                logger.warning("外部用户邀请失败，邮件列表: %s", ext_emails)
+
+        # Step 3: 可选与会者（带 is_optional: True，失败则降级为普通成员）
         opt_ids = [oid for oid in (optional_open_ids or []) if oid not in set(attendee_open_ids)]
         if opt_ids:
             opt_entries_with_flag = [{"type": "user", "user_id": oid, "is_optional": True} for oid in opt_ids]
@@ -811,7 +820,8 @@ class FeishuClient:
                 logger.warning("is_optional 标记失败，降级为普通成员再次添加")
                 _post_attendees([{"type": "user", "user_id": oid} for oid in opt_ids])
 
-        logger.info("与会者邀请已发送: event=%s, 必选 %d 人, 可选 %d 人", event_id, len(attendee_open_ids), len(opt_ids))
+        logger.info("与会者邀请已发送: event=%s, 内部 %d 人, 外部邮件 %d 人, 可选 %d 人",
+                    event_id, len(attendee_open_ids), len(ext_emails), len(opt_ids))
         return ok
 
     def get_event_attendees(self, calendar_id: str, event_id: str) -> list[dict]:

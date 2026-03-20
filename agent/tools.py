@@ -162,7 +162,9 @@ TOOL_DEFINITIONS = [
         "description": (
             "创建飞书日历会议邀请，并向所有与会者发送邀请。"
             "会议创建成功后返回日历链接和会议信息。\n"
-            "支持将部分与会者标记为 Optional（可选参加），在 optional_attendee_open_ids 中填写。"
+            "支持将部分与会者标记为 Optional（可选参加），在 optional_attendee_open_ids 中填写。\n"
+            "外部用户（非本公司飞书账号）无法通过 search_users 查到 open_id，"
+            "请将其邮箱地址填入 attendee_emails，系统会以第三方方式邀请。"
         ),
         "input_schema": {
             "type": "object",
@@ -179,7 +181,13 @@ TOOL_DEFINITIONS = [
                 "attendee_open_ids": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "必选与会者的飞书 open_id 列表（含会议发起人）",
+                    "description": "必选与会者的飞书 open_id 列表（含会议发起人）。仅限内部飞书用户。",
+                },
+                "attendee_emails": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "外部用户（非本公司飞书账号）的邮箱列表，用于第三方日历邀请。内部用户请用 attendee_open_ids。",
+                    "default": [],
                 },
                 "optional_attendee_open_ids": {
                     "type": "array",
@@ -941,6 +949,7 @@ class ToolExecutor:
         description: str = "",
         location: str = "",
         optional_attendee_open_ids: list[str] | None = None,
+        attendee_emails: list[str] | None = None,
     ) -> str:
         try:
             start_dt = _parse_dt(start_time)
@@ -949,6 +958,7 @@ class ToolExecutor:
             return f"时间格式解析失败: {e}，请使用 ISO 8601 格式（如 2026-03-14T15:00:00）"
 
         optional_ids = optional_attendee_open_ids or []
+        ext_emails = [e.strip() for e in (attendee_emails or []) if e.strip()]
 
         # Step 1: 创建事件（不含与会者）
         result = self.feishu.create_calendar_event(
@@ -967,10 +977,12 @@ class ToolExecutor:
         # Step 2: 通过 /attendees API 发送正式日历邀请（含 optional 标记）
         all_ids = list(attendee_open_ids) + [oid for oid in optional_ids if oid not in attendee_open_ids]
         invite_ok = self.feishu.add_event_attendees(
-            calendar_id, event_id, attendee_open_ids, optional_open_ids=optional_ids
+            calendar_id, event_id, attendee_open_ids,
+            optional_open_ids=optional_ids,
+            attendee_emails=ext_emails,
         )
 
-        # Step 3: IM 消息兜底通知（无论日历邀请是否成功，确保受邀者知晓会议）
+        # Step 3: IM 消息兜底通知（仅内部飞书用户；外部用户收日历邮件即可）
         start_str = start_dt.strftime("%Y-%m-%d %H:%M")
         end_str = end_dt.strftime("%H:%M")
         optional_set = set(optional_ids)
@@ -1004,14 +1016,16 @@ class ToolExecutor:
             else "⚠️ 日历邀请发送失败（可能需审批 calendar:acl:write 权限），已发送飞书消息通知"
         )
         optional_note = f"\n可选参与者（Optional）：{len(optional_ids)} 人" if optional_ids else ""
+        ext_note = f"\n外部用户（邮件邀请）：{', '.join(ext_emails)}" if ext_emails else ""
+        im_note = "已向内部受邀者发送飞书消息通知，将实时追踪回复状态。" if all_ids else ""
         return (
             f"会议已创建成功！\n"
             f"标题：{title}\n"
             f"时间：{start_str} - {end_str}\n"
             f"地点：{location or '未设置'}\n"
-            f"必选与会人数：{len(attendee_open_ids)} 人{optional_note}\n"
+            f"必选与会人数：{len(attendee_open_ids)} 人{optional_note}{ext_note}\n"
             f"{invite_note}\n"
-            f"已向所有受邀者发送飞书消息通知，将实时追踪回复状态。\n"
+            f"{im_note}\n"
             f"[event_id={event_id} calendar_id={calendar_id}]"
         )
 
