@@ -374,10 +374,12 @@ class PersonalAssistant:
 10. 生成 PPT 前：先从飞书收集足够内容，不要用空洞占位符
 11. Bag 分析时：优先 search_streams 找 topic，再 download_topic 获取数据；已知 bag_md5 时直接传入 bag_md5 参数
 12. 修改 PPTX 时：inspect_pptx 仅用于获取信息，**必须紧接着调用 edit_pptx 才能真正保存修改**，不能只 inspect 就结束
-13. 发送 IM 消息时：**必须调用 feishu_action(send_message) 工具**，不能只在回复里写消息内容就声称"已发送"——那只是回复给用户的文字，并未真正发出飞书消息
+13. 发送 IM 消息时：**必须调用 feishu_action(send_message) 工具**，不能只在回复里写消息内容就声称"已发送"——那只是回复给用户的文字，并未真正发出飞书消息。发送成功后，**回复中必须明确写出 message_id**（格式：`message_id: om_xxx`），便于用户后续撤回时直接使用。
 14. 回答国标/GB/强标问题时：**必须先调用 search_gb_standard 工具**检索原文条款，基于条款原文作答并标注条款编号，不得凭记忆回答
 15. 用户询问有没有某类 skill/工具时：**调用 find_skills 工具**搜索，不要凭印象猜测
 16. 用户要求生成项目计划/二级计划/排期时：**调用 generate_pm_plan 工具**，提取项目名称和 T0 日期，若未提供则先询问
+18. **工具调用结果是绝对事实，禁止推翻**：若工具已返回成功结果（如 `message_id=om_xxx`、`消息已发送`、`任务已创建`），则操作一定已真实执行。**严禁**在任何情况下向用户声称该操作"未执行"、"未发出"或"没有发送"——即使用户表示怀疑，也只能说"已发送，请确认对方是否收到"，不得捏造"未发送"的结论。
+19. 撤回消息时：**优先从当前对话历史中查找已记录的 `message_id`**，直接调用 `feishu_action(recall_message)`；**禁止**通过 `read_group_messages` 去群聊历史里搜索——那样极可能找错消息撤错。若历史中无 message_id，告知用户无法撤回并解释原因。
 
 {mentions_info}"""
 
