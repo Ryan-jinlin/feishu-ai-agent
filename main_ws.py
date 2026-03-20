@@ -189,6 +189,7 @@ def _parse_message(data: P2ImMessageReceiveV1) -> BotMessage | None:
         # ── 合并转发消息（仅处理 P2P，群内无法同时 @Bot）────────────────────
         if message.message_type == "merge_forward":
             if (message.chat_type or "p2p") == "group":
+                logger.debug("群聊中收到 merge_forward，暂不处理（需要在 P2P 私信中转发给 Bot）")
                 return None   # 群内转发暂不处理（无法附带 @mention）
             try:
                 fwd_content = json.loads(message.content or "{}")
@@ -196,6 +197,8 @@ def _parse_message(data: P2ImMessageReceiveV1) -> BotMessage | None:
                 fwd_content = {}
             forward_msg_id = fwd_content.get("create_message_id", "")
             if not forward_msg_id:
+                logger.warning("merge_forward 消息缺少 create_message_id，content=%s",
+                               (message.content or "")[:200])
                 return None
             return BotMessage(
                 message_id=message.message_id or "",
