@@ -1,9 +1,11 @@
 """飞书个人助理 — 长连接（WebSocket）模式，无需公网 URL"""
 from __future__ import annotations
 
+import atexit
 import json
 import logging
 import os
+import signal
 import sys
 import threading
 
@@ -15,6 +17,34 @@ from dotenv import load_dotenv
 # 必须在内部模块 import 前加载 .env，否则 tools.py 等模块级常量（如 PPT_OUTPUT_DIR）
 # 会在 os.environ 尚未注入时就已固化为默认值
 load_dotenv()
+
+# ── 单实例守卫：启动时自动终止旧进程，防止多实例并发导致 token 文件竞争 ──────
+_PID_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".bot.pid")
+
+def _ensure_single_instance() -> None:
+    """若 PID 文件已存在且对应进程仍在运行，先将其终止，再写入当前 PID。"""
+    if os.path.exists(_PID_FILE):
+        try:
+            with open(_PID_FILE) as f:
+                old_pid = int(f.read().strip())
+            if old_pid != os.getpid():
+                os.kill(old_pid, signal.SIGTERM)
+                import time as _t
+                _t.sleep(1)
+                # 若 SIGTERM 后仍存活则强制终止
+                try:
+                    os.kill(old_pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                print(f"[单实例] 已终止旧进程 PID={old_pid}", flush=True)
+        except (ValueError, ProcessLookupError, PermissionError):
+            pass
+        except Exception as e:
+            print(f"[单实例] 终止旧进程时出错（忽略）: {e}", flush=True)
+    # 写入当前 PID
+    with open(_PID_FILE, "w") as f:
+        f.write(str(os.getpid()))
+    atexit.register(lambda: os.path.exists(_PID_FILE) and os.remove(_PID_FILE))
 
 from agent.assistant import PersonalAssistant
 from agent.daily_summary import DailySummaryJob
@@ -123,12 +153,46 @@ def _extract_post_text(content: dict) -> str:
     return ""
 
 
+def _fmt_ts(ts: int) -> str:
+    """将 Unix 时间戳（秒）格式化为 MM-DD HH:MM（上海时区）"""
+    try:
+        import pytz as _pytz
+        from datetime import datetime as _dt
+        tz = _pytz.timezone("Asia/Shanghai")
+        return _dt.fromtimestamp(ts, tz).strftime("%m-%d %H:%M")
+    except Exception:
+        return str(ts)
+
+
 def _parse_message(data: P2ImMessageReceiveV1) -> BotMessage | None:
     """将 lark_oapi 事件转换为 BotMessage"""
     try:
         event   = data.event
         message = event.message
         sender  = event.sender
+        sender_id = sender.sender_id
+        sender_open_id = sender_id.open_id if (sender_id and sender_id.open_id) else ""
+
+        # ── 合并转发消息（仅处理 P2P，群内无法同时 @Bot）────────────────────
+        if message.message_type == "merge_forward":
+            if (message.chat_type or "p2p") == "group":
+                return None   # 群内转发暂不处理（无法附带 @mention）
+            try:
+                fwd_content = json.loads(message.content or "{}")
+            except json.JSONDecodeError:
+                fwd_content = {}
+            forward_msg_id = fwd_content.get("create_message_id", "")
+            if not forward_msg_id:
+                return None
+            return BotMessage(
+                message_id=message.message_id or "",
+                sender_open_id=sender_open_id,
+                chat_id=message.chat_id or "",
+                chat_type=message.chat_type or "p2p",
+                raw_text="",
+                clean_text="[转发消息]",
+                forward_msg_id=forward_msg_id,
+            )
 
         if message.message_type not in ("text", "post"):
             return None
@@ -174,9 +238,6 @@ def _parse_message(data: P2ImMessageReceiveV1) -> BotMessage | None:
         clean_text = raw_text
         for m in mentions:
             clean_text = clean_text.replace(m.key, m.name).strip()
-
-        sender_id = sender.sender_id
-        sender_open_id = sender_id.open_id if (sender_id and sender_id.open_id) else ""
 
         return BotMessage(
             message_id=message.message_id or "",
@@ -321,6 +382,24 @@ def do_p2_im_message_receive_v1(data: P2ImMessageReceiveV1) -> None:
 
         def _process_in_background() -> None:
             try:
+                # ── 合并转发：先获取转发内容，注入 clean_text 让 Claude 做摘要 ──
+                if msg.forward_msg_id:
+                    fwd_msgs = feishu.get_merge_forward_messages(msg.forward_msg_id)
+                    if not fwd_msgs:
+                        feishu.reply_card(
+                            msg.message_id,
+                            "无法读取转发的消息内容，请确认 Bot 有读取权限（需要 im:message:readonly）。",
+                        )
+                        return
+                    lines = [
+                        f"[{_fmt_ts(m['ts'])}] {m['sender_name']}: {m['text']}"
+                        for m in fwd_msgs
+                    ]
+                    msg.clean_text = (
+                        f"用户转发了以下 {len(fwd_msgs)} 条聊天记录，"
+                        "请做摘要（提炼关键讨论议题、决策和行动项）：\n\n"
+                        + "\n".join(lines)
+                    )
                 reply_text = assistant.process(msg)
                 logger.info("回复: %s", reply_text[:200])
                 feishu.reply_card(msg.message_id, reply_text)
@@ -415,6 +494,7 @@ def _warmup_feishu_token() -> None:
 # ------------------------------------------------------------------ #
 
 if __name__ == "__main__":
+    _ensure_single_instance()   # 终止旧进程，保证单实例运行
     logger.info("个人助理机器人启动（长连接模式）")
 
     # RSVP 轮询定时任务（每 5 分钟）+ 每日摘要（每天 00:00:05）+ token 预热（每 90 分钟）

@@ -34,6 +34,7 @@ class BotMessage:
     raw_text: str               # 含占位符的原始文本
     clean_text: str             # 去除 @机器人 后的干净文本
     mentions: list[MentionedUser] = field(default_factory=list)
+    forward_msg_id: str = ""    # 合并转发消息的 create_message_id（非空时表示是转发）
 
 
 class FeishuBotEventParser:
@@ -122,12 +123,34 @@ class FeishuBotEventParser:
         sender = event.get("sender", {})
 
         message_type = message.get("message_type", "")
+        message_id  = message.get("message_id", "")
+        sender_open_id = sender.get("sender_id", {}).get("open_id", "")
+        chat_id    = message.get("chat_id", "")
+        chat_type  = message.get("chat_type", "p2p")
+        content_str = message.get("content", "{}")
+
+        # ── 合并转发消息：特殊处理，仅提取 create_message_id ──────────────
+        if message_type == "merge_forward":
+            try:
+                fwd_content = json.loads(content_str)
+            except json.JSONDecodeError:
+                fwd_content = {}
+            forward_msg_id = fwd_content.get("create_message_id", "")
+            return BotMessage(
+                message_id=message_id,
+                sender_open_id=sender_open_id,
+                chat_id=chat_id,
+                chat_type=chat_type,
+                raw_text="",
+                clean_text="[转发消息]",
+                forward_msg_id=forward_msg_id,
+            )
+
         if message_type not in ("text", "post"):
             # 暂只处理文本和富文本消息
             return None
 
         # 解析消息内容
-        content_str = message.get("content", "{}")
         try:
             content = json.loads(content_str)
         except json.JSONDecodeError:
@@ -154,10 +177,10 @@ class FeishuBotEventParser:
             clean_text = clean_text.replace(m.key, m.name).strip()
 
         return BotMessage(
-            message_id=message.get("message_id", ""),
-            sender_open_id=sender.get("sender_id", {}).get("open_id", ""),
-            chat_id=message.get("chat_id", ""),
-            chat_type=message.get("chat_type", "p2p"),
+            message_id=message_id,
+            sender_open_id=sender_open_id,
+            chat_id=chat_id,
+            chat_type=chat_type,
             raw_text=raw_text,
             clean_text=clean_text,
             mentions=mentions,

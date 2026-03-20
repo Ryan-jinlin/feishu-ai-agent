@@ -18,6 +18,9 @@ TZ_SHANGHAI = pytz.timezone("Asia/Shanghai")
 # 持久化应用日历 ID，避免每次重启都创建新日历
 _CALENDAR_ID_FILE = os.path.join(os.path.dirname(__file__), "..", ".feishu_calendar_id")
 
+# 用户 IM OAuth token（由 scripts/authorize_user_im.py 生成，用于读取 Bot 不在的群）
+_USER_IM_TOKEN_FILE = os.path.join(os.path.dirname(__file__), "..", ".user_im_token.json")
+
 # Momenta 蓝：飞书卡片 template 使用 "blue"（最接近 #0066FF）
 _CARD_TEMPLATE = "blue"
 
@@ -917,6 +920,163 @@ class FeishuClient:
         except Exception:
             return None
 
+    def _get_user_im_token(self) -> str | None:
+        """加载用户 IM access_token，过期时自动用 refresh_token 换新。
+        token 由 scripts/authorize_user_im.py 生成，存于 .user_im_token.json。
+        """
+        try:
+            if not os.path.exists(_USER_IM_TOKEN_FILE):
+                return None
+            with open(_USER_IM_TOKEN_FILE, encoding="utf-8") as f:
+                data = json.load(f)
+            access_token = data.get("access_token")
+            if not access_token:
+                return None
+            # 检查是否在有效期内（留 60s 余量）
+            saved_at = data.get("saved_at", 0)
+            expires_in = data.get("expires_in", 7200)
+            if saved_at and time.time() < saved_at + expires_in - 60:
+                return access_token
+            # 尝试用 refresh_token 自动换新
+            refresh_token = data.get("refresh_token")
+            if not refresh_token:
+                logger.warning("user_im_token 已过期且无 refresh_token，请重新运行授权脚本")
+                return None
+            import base64 as _b64
+            basic = _b64.b64encode(
+                f"{self.app_id}:{self.app_secret}".encode()
+            ).decode()
+            resp = requests.post(
+                f"{FEISHU_HOST}/open-apis/authen/v1/oidc/refresh_access_token",
+                headers={"Authorization": f"Basic {basic}", "Content-Type": "application/json"},
+                json={"grant_type": "refresh_token", "refresh_token": refresh_token},
+                timeout=15,
+            )
+            result = resp.json()
+            if result.get("code") == 0:
+                new_data = result.get("data", {})
+                new_data["saved_at"] = int(time.time())
+                with open(_USER_IM_TOKEN_FILE, "w", encoding="utf-8") as f:
+                    json.dump(new_data, f, ensure_ascii=False, indent=2)
+                logger.info("user_im_token 已自动刷新")
+                return new_data.get("access_token")
+            else:
+                logger.warning("user_im_token 刷新失败: %s，请重新运行授权脚本", result)
+                return None
+        except Exception as e:
+            logger.warning("_get_user_im_token 失败: %s", e)
+            return None
+
+    def _user_im_headers(self) -> dict | None:
+        """返回使用用户 IM token 的请求头；无 token 时返回 None。"""
+        token = self._get_user_im_token()
+        if not token:
+            return None
+        return {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+
+    def get_user_joined_groups(self) -> list[dict]:
+        """用用户身份获取用户所在的所有群（含 Bot 不在的群）。返回 [{chat_id, name}]"""
+        headers = self._user_im_headers()
+        if not headers:
+            return []
+        groups: list[dict] = []
+        page_token = ""
+        while True:
+            params: dict = {"page_size": 100, "user_id_type": "open_id"}
+            if page_token:
+                params["page_token"] = page_token
+            try:
+                resp = requests.get(
+                    f"{FEISHU_HOST}/open-apis/im/v1/chats",
+                    headers=headers,
+                    params=params,
+                    timeout=15,
+                )
+                data = resp.json()
+                if data.get("code") != 0:
+                    logger.warning("get_user_joined_groups 失败: %s", data)
+                    break
+                for item in data.get("data", {}).get("items", []):
+                    if item.get("chat_type") != "p2p":
+                        groups.append({"chat_id": item["chat_id"], "name": item.get("name", "")})
+                if not data.get("data", {}).get("has_more"):
+                    break
+                page_token = data["data"].get("page_token", "")
+            except Exception as e:
+                logger.error("get_user_joined_groups 异常: %s", e)
+                break
+        return groups
+
+    def get_group_messages_as_user(
+        self, chat_id: str, start_ts: int, end_ts: int, max_msgs: int = 200
+    ) -> list[dict]:
+        """用用户身份读取群消息（适用于 Bot 不在该群的场景）。"""
+        headers = self._user_im_headers()
+        if not headers:
+            logger.warning("get_group_messages_as_user: 无用户 IM token，请运行授权脚本")
+            return []
+        messages: list[dict] = []
+        page_token = ""
+        while len(messages) < max_msgs:
+            params: dict = {
+                "container_id_type": "chat",
+                "container_id": chat_id,
+                "start_time": str(start_ts),
+                "end_time": str(end_ts),
+                "sort_type": "ByCreateTimeAsc",
+                "page_size": 50,
+            }
+            if page_token:
+                params["page_token"] = page_token
+            try:
+                resp = requests.get(
+                    f"{FEISHU_HOST}/open-apis/im/v1/messages",
+                    headers=headers,
+                    params=params,
+                    timeout=15,
+                )
+                data = resp.json()
+                if data.get("code") != 0:
+                    logger.warning(
+                        "get_group_messages_as_user [%s] 失败: %s", chat_id, data
+                    )
+                    break
+                for item in data.get("data", {}).get("items", []):
+                    try:
+                        msg_type = item.get("msg_type", "")
+                        if msg_type not in ("text", "post"):
+                            continue
+                        body = item.get("body", {})
+                        content_str = body.get("content", "{}")
+                        try:
+                            content = json.loads(content_str)
+                        except Exception:
+                            content = {}
+                        if msg_type == "text":
+                            text = content.get("text", "").strip()
+                        else:
+                            text = self._extract_post_text(content)
+                        if not text:
+                            continue
+                        sender_id = item.get("sender", {}).get("id", "")
+                        sender_name = self._resolve_sender_name(sender_id)
+                        messages.append({
+                            "message_id": item.get("message_id", ""),
+                            "sender_name": sender_name,
+                            "text": text,
+                            "ts": int(item.get("create_time", "0")),
+                        })
+                    except Exception as item_err:
+                        logger.warning("跳过单条消息解析失败: %s", item_err)
+                        continue
+                if not data.get("data", {}).get("has_more"):
+                    break
+                page_token = data["data"].get("page_token", "")
+            except Exception as e:
+                logger.error("get_group_messages_as_user 异常: %s", e)
+                break
+        return messages
+
     def move_wiki_page(
         self, space_id: str, node_token: str, target_parent_token: str
     ) -> dict | None:
@@ -1279,6 +1439,13 @@ class FeishuClient:
                 data = resp.json()
                 if data.get("code") != 0:
                     logger.warning("get_group_messages [%s] 失败: %s", chat_id, data)
+                    # 权限错误时尝试用用户 token 重试
+                    if not messages:
+                        user_msgs = self.get_group_messages_as_user(
+                            chat_id, start_ts, end_ts, max_msgs
+                        )
+                        if user_msgs:
+                            return user_msgs
                     break
                 for item in data.get("data", {}).get("items", []):
                     try:
@@ -1313,6 +1480,74 @@ class FeishuClient:
                 page_token = data["data"].get("page_token", "")
             except Exception as e:
                 logger.error("get_group_messages 异常: %s", e)
+                break
+        return messages
+
+    def get_merge_forward_messages(
+        self, create_message_id: str, max_msgs: int = 300
+    ) -> list[dict]:
+        """读取合并转发消息包内的原始消息列表。
+        使用 container_id_type=merge_forward_chat，container_id=create_message_id。
+        返回 [{sender_name, text, ts, message_id}]
+        """
+        messages: list[dict] = []
+        page_token = ""
+        while len(messages) < max_msgs:
+            params: dict = {
+                "container_id_type": "merge_forward_chat",
+                "container_id": create_message_id,
+                "sort_type": "ByCreateTimeAsc",
+                "page_size": 50,
+            }
+            if page_token:
+                params["page_token"] = page_token
+            try:
+                resp = requests.get(
+                    f"{FEISHU_HOST}/open-apis/im/v1/messages",
+                    headers=self._headers(),
+                    params=params,
+                    timeout=15,
+                )
+                data = resp.json()
+                if data.get("code") != 0:
+                    logger.warning(
+                        "get_merge_forward_messages [%s] 失败: %s",
+                        create_message_id, data,
+                    )
+                    break
+                for item in data.get("data", {}).get("items", []):
+                    try:
+                        msg_type = item.get("msg_type", "")
+                        if msg_type not in ("text", "post"):
+                            continue
+                        body = item.get("body", {})
+                        content_str = body.get("content", "{}")
+                        try:
+                            content = json.loads(content_str)
+                        except Exception:
+                            content = {}
+                        if msg_type == "text":
+                            text = content.get("text", "").strip()
+                        else:
+                            text = self._extract_post_text(content)
+                        if not text:
+                            continue
+                        sender_id = item.get("sender", {}).get("id", "")
+                        sender_name = self._resolve_sender_name(sender_id)
+                        messages.append({
+                            "message_id": item.get("message_id", ""),
+                            "sender_name": sender_name,
+                            "text": text,
+                            "ts": int(item.get("create_time", "0")),
+                        })
+                    except Exception as item_err:
+                        logger.warning("跳过单条消息解析失败: %s", item_err)
+                        continue
+                if not data.get("data", {}).get("has_more"):
+                    break
+                page_token = data["data"].get("page_token", "")
+            except Exception as e:
+                logger.error("get_merge_forward_messages 异常: %s", e)
                 break
         return messages
 

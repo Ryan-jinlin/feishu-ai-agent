@@ -301,11 +301,14 @@ TOOL_DEFINITIONS = [
             "  - 发群消息：chat_id + message（send_to_chat=true）\n"
             "  - @mention 他人：在 message 中写 <at user_id=\"对方open_id\">姓名</at>\n"
             "• recall_message — 撤回（删除）一条消息（需要 message_id）\n"
-            "• list_groups — 获取 Bot 所在的所有群列表（返回 chat_id + 群名）\n"
+            "• list_groups — 获取群列表：含 Bot 当前在群、用户在群但 Bot 不在（已授权 OAuth 时）、Bot 历史群（已被移出）\n"
             "• create_group — 创建飞书群聊并拉入成员（需要 group_name + member_open_ids）。返回群 chat_id 和邀请链接\n"
             "• delete_group — 解散飞书群聊（需要 chat_id；Bot 必须是群主）\n"
             "• get_group_members — 获取指定群的全部成员列表（返回 open_id + 姓名），不依赖消息历史，用于组织全员会议时获取群成员\n"
-            "• read_group_messages — 读取指定群或 P2P 私信最近 N 小时的消息（群用 chat_id，与某用户私信用 p2p_open_id）。⚠️ 禁止用此工具来识别群成员，请改用 get_group_members\n"
+            "• read_group_messages — 读取指定群或 P2P 私信的消息。"
+            "支持两种时间模式：① hours=N 读最近 N 小时；② start_time+end_time 精确读取某时间段（格式 'YYYY-MM-DD HH:MM'）。"
+            "Bot 不在该群时自动用用户 OAuth token 尝试读取（需已完成授权）。"
+            "⚠️ 禁止用此工具来识别群成员，请改用 get_group_members\n"
             "• apply_mentions — 将 wiki 页面中的 @Name 纯文本替换为真正的飞书 @mention（需要 url + mention_map）\n"
             "• inspect_pptx — 列出 PPTX 每页所有形状的坐标（英寸）、文字预览，用于了解结构后再做精确修改\n"
             "• edit_pptx — 下载飞书云盘中的 PPTX，在原文件上做文本替换 + 形状位置/尺寸调整（保留格式），保存到本地。\n"
@@ -402,8 +405,24 @@ TOOL_DEFINITIONS = [
                 },
                 "hours": {
                     "type": "integer",
-                    "description": "读取最近多少小时的消息（action=read_group_messages 时可选，默认 24）",
+                    "description": "读取最近多少小时的消息（action=read_group_messages 时可选，默认 24；当 start_time/end_time 均填写时本参数被忽略）",
                     "default": 24,
+                },
+                "start_time": {
+                    "type": "string",
+                    "description": (
+                        "消息起始时间（action=read_group_messages 时可选）。"
+                        "支持格式：'2025-03-20 14:00'、'2025-03-20T14:00:00+08:00'。"
+                        "不含时区时默认按上海时间（UTC+8）解析。"
+                        "与 end_time 同时填写时，忽略 hours 参数，精确读取该时间段消息。"
+                    ),
+                },
+                "end_time": {
+                    "type": "string",
+                    "description": (
+                        "消息截止时间（action=read_group_messages 时可选，与 start_time 配合使用）。"
+                        "格式同 start_time。"
+                    ),
                 },
                 "mention_map": {
                     "type": "object",
@@ -1143,6 +1162,8 @@ class ToolExecutor:
         chat_id: str = "",
         p2p_open_id: str = "",
         hours: int = 24,
+        start_time: str = "",
+        end_time: str = "",
         mention_map: dict | None = None,
         obj_token: str = "",
         slide_index: int | None = None,
@@ -1230,12 +1251,23 @@ class ToolExecutor:
                 return f"消息撤回异常：{e}"
         if action == "list_groups":
             try:
-                # 当前已加入的群
+                # Bot 当前已加入的群
                 current_groups = self.feishu.get_joined_groups()
                 current_ids = {g["chat_id"] for g in current_groups}
                 lines = []
                 for g in current_groups:
-                    lines.append(f"- [群] {g.get('name', '未知群名')}（chat_id: {g['chat_id']}）")
+                    lines.append(f"- [Bot在群] {g.get('name', '未知群名')}（chat_id: {g['chat_id']}）")
+
+                # 用户身份加入的群（Bot 不在，但用户有 OAuth 授权）
+                user_groups = self.feishu.get_user_joined_groups()
+                user_only_count = 0
+                for g in user_groups:
+                    cid = g["chat_id"]
+                    if cid in current_ids:
+                        continue
+                    current_ids.add(cid)
+                    lines.append(f"- [用户在群/Bot不在] {g.get('name', '未知群名')}（chat_id: {cid}）")
+                    user_only_count += 1
 
                 # 从本地消息缓存中补充：Bot 曾参与但已离开的群
                 if self._message_cache:
@@ -1243,6 +1275,7 @@ class ToolExecutor:
                         cid = c["chat_id"]
                         if cid in current_ids:
                             continue
+                        current_ids.add(cid)
                         label = "[历史群-已离开]" if c.get("chat_type") != "p2p" else "[P2P]"
                         name = c.get("name") or cid
                         lines.append(f"- {label} {name}（chat_id: {cid}）")
@@ -1256,7 +1289,11 @@ class ToolExecutor:
 
                 if not lines:
                     return "Bot 当前不在任何群组中，也没有历史消息缓存。"
-                return f"Bot 参与的会话（当前 {len(current_groups)} 个群）：\n" + "\n".join(lines)
+                summary = f"Bot 参与的会话（Bot 在群：{len(current_groups)} 个"
+                if user_only_count:
+                    summary += f"，用户在群/Bot不在：{user_only_count} 个"
+                summary += "）："
+                return summary + "\n" + "\n".join(lines)
             except Exception as e:
                 return f"获取群列表失败：{e}"
         if action == "create_group":
@@ -1328,26 +1365,68 @@ class ToolExecutor:
             if not chat_id:
                 return "错误：read_group_messages 需要提供 chat_id（群）或 p2p_open_id（P2P 私信）参数。"
             import time as _time
-            end_ts   = int(_time.time())
-            start_ts = end_ts - hours * 3600
+            # 优先使用明确的时间段；否则按 hours 回退
+            if start_time and end_time:
+                import pytz as _pytz
+                from datetime import datetime as _datetime
+                _TZ = _pytz.timezone("Asia/Shanghai")
+                def _parse_dt(s: str) -> int:
+                    for fmt in (
+                        "%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M%z",
+                        "%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d",
+                    ):
+                        try:
+                            dt = _datetime.strptime(s.strip(), fmt)
+                            if dt.tzinfo is None:
+                                dt = _TZ.localize(dt)
+                            return int(dt.timestamp())
+                        except ValueError:
+                            continue
+                    raise ValueError(f"无法解析时间格式: {s!r}")
+                try:
+                    start_ts = _parse_dt(start_time)
+                    end_ts   = _parse_dt(end_time)
+                except ValueError as ve:
+                    return f"时间格式错误：{ve}。请使用 'YYYY-MM-DD HH:MM' 格式。"
+            else:
+                end_ts   = int(_time.time())
+                start_ts = end_ts - hours * 3600
             msgs = []
             source = "API"
             try:
                 msgs = self.feishu.get_group_messages(chat_id, start_ts, end_ts, max_msgs=300)
+                if msgs:
+                    source = "API"
             except Exception as e:
-                logger.warning("get_group_messages API 失败，尝试本地缓存: %s", e)
-            # API 无结果时降级到本地消息缓存（适用于 Bot 已被移出的群）
+                logger.warning("get_group_messages API 失败: %s", e)
+            # Bot token 无结果时，显式尝试用户 token（Bot 不在群/曾被移出时）
+            if not msgs:
+                try:
+                    user_msgs = self.feishu.get_group_messages_as_user(
+                        chat_id, start_ts, end_ts, max_msgs=300
+                    )
+                    if user_msgs:
+                        msgs = user_msgs
+                        source = "用户身份API"
+                except Exception as ue:
+                    logger.warning("get_group_messages_as_user 失败: %s", ue)
+            # 最终降级到本地消息缓存
             if not msgs and self._message_cache:
                 msgs = self._message_cache.get_messages(chat_id, start_ts, end_ts, max_msgs=300)
                 source = "本地缓存"
+            # 用于展示的时间描述
+            if start_time and end_time:
+                time_desc = f"{start_time} ~ {end_time}"
+            else:
+                time_desc = f"最近 {hours} 小时"
             if not msgs:
-                return f"最近 {hours} 小时内没有消息。"
+                return f"{time_desc} 内没有消息。"
             lines = []
             for m in msgs:
                 mid = m.get("message_id", "")
                 mid_str = f" [id:{mid}]" if mid else ""
                 lines.append(f"[{m.get('sender_name', '?')}]{mid_str} {m.get('text', '')}")
-            return f"最近 {hours} 小时共 {len(msgs)} 条消息（来源：{source}）：\n\n" + "\n".join(lines)
+            return f"{time_desc} 共 {len(msgs)} 条消息（来源：{source}）：\n\n" + "\n".join(lines)
         if action == "apply_mentions":
             if not url:
                 return "错误：apply_mentions 需要提供 url 参数（wiki 页面 URL）。"
@@ -1371,7 +1450,7 @@ class ToolExecutor:
             if not replacements and not shape_updates:
                 return "错误：edit_pptx 需要提供 replacements（文本替换）或 shape_updates（形状调整）中至少一个。"
             return self._edit_pptx_in_place(obj_token, replacements or [], shape_updates or [], output_filename)
-        return f"未知 feishu_action: {action}。支持: search, read_page, list_pages, create_page, edit_page, move_page, send_message, recall_message, list_groups, create_group（group_name + member_open_ids）, get_group_members（chat_id）, read_group_messages（chat_id 或 p2p_open_id）, apply_mentions, inspect_pptx, edit_pptx"
+        return f"未知 feishu_action: {action}。支持: search, read_page, list_pages, create_page, edit_page, move_page, send_message, recall_message, list_groups, create_group（group_name + member_open_ids）, get_group_members（chat_id）, read_group_messages（chat_id 或 p2p_open_id；hours 或 start_time+end_time）, apply_mentions, inspect_pptx, edit_pptx"
 
     def _run_feishu_cli(self, *args: str, timeout: int = 30) -> str:
         """调用 feishu-sync-cli，返回 stdout 字符串；失败时自动重试最多 2 次"""
