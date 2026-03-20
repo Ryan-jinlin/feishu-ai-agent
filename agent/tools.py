@@ -1519,7 +1519,13 @@ class ToolExecutor:
                         source = "用户身份API"
                 except Exception as ue:
                     logger.warning("get_group_messages_as_user 失败: %s", ue)
-                    api_error_note = f"（API 错误：{ue}）"
+                    ue_str = str(ue)
+                    if "231204" in ue_str:
+                        api_error_note = "（提示：当前应用类型不支持以用户身份读取群消息。需将 Bot 加入该群，Bot 才能直接读取消息）"
+                    elif "230002" in ue_str:
+                        api_error_note = "（提示：Bot 不在该群内。需将 Bot 加入该群才能读取消息）"
+                    else:
+                        api_error_note = f"（API 错误：{ue}）"
             # 最终降级到本地消息缓存
             if not msgs and self._message_cache:
                 msgs = self._message_cache.get_messages(chat_id, start_ts, end_ts, max_msgs=300)

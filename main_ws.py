@@ -196,9 +196,15 @@ def _parse_message(data: P2ImMessageReceiveV1) -> BotMessage | None:
             except json.JSONDecodeError:
                 fwd_content = {}
             forward_msg_id = fwd_content.get("create_message_id", "")
+            # SDK 某些版本 content 返回纯文本而非 JSON，此时用 message_id 本身作为容器 ID
             if not forward_msg_id:
-                logger.warning("merge_forward 消息缺少 create_message_id，content=%s",
-                               (message.content or "")[:200])
+                forward_msg_id = message.message_id or ""
+                logger.info(
+                    "merge_forward content 非 JSON（content=%s），改用 message_id=%s 作为 container_id",
+                    (message.content or "")[:100], forward_msg_id,
+                )
+            if not forward_msg_id:
+                logger.warning("merge_forward 消息既无 create_message_id 也无 message_id，忽略")
                 return None
             return BotMessage(
                 message_id=message.message_id or "",
