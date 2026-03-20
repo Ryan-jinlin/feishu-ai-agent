@@ -424,6 +424,9 @@ class PersonalAssistant:
             "",
         )
         req_category = self._classify_request(msg.clean_text, last_reply)
+        # 含图片的消息跳过 Haiku（Haiku 不支持视觉），至少用 Sonnet
+        if msg.image_data and req_category == "simple":
+            req_category = "read"
         logger.info("[路由] 请求分类: %s（消息: %s…）", req_category, msg.clean_text[:40])
 
         # ── simple：Haiku 直接回答，不调用工具 ──────────────────────
@@ -443,11 +446,11 @@ class PersonalAssistant:
                     model="claude-haiku-4-5-20251001",
                     max_tokens=1024,
                     system=simple_system,
-                    messages=history + [{"role": "user", "content": msg.clean_text}],
+                    messages=history + [{"role": "user", "content": self._build_user_content(msg)}],
                 )
                 text = self._extract_text(resp)
                 new_history = history + [
-                    {"role": "user", "content": msg.clean_text},
+                    {"role": "user", "content": msg.clean_text or "[图片]"},
                     {"role": "assistant", "content": text},
                 ]
                 self._histories[msg.sender_open_id] = new_history[-(self._MAX_HISTORY_TURNS * 2):]
@@ -469,7 +472,7 @@ class PersonalAssistant:
         logger.info("[路由] 使用模型: %s, thinking: %s", _model, _thinking)
         # ─────────────────────────────────────────────────────────────
 
-        messages = history + [{"role": "user", "content": msg.clean_text}]
+        messages = history + [{"role": "user", "content": self._build_user_content(msg)}]
 
         logger.info("[DEBUG] API base_url=%s", os.environ.get("ANTHROPIC_BASE_URL", "https://api.anthropic.com (default)"))
         logger.info("[DEBUG] 发送 %d 个工具到 API: %s，历史轮数: %d",
@@ -500,9 +503,9 @@ class PersonalAssistant:
             if response.stop_reason == "end_turn":
                 text = self._extract_text(response)
                 logger.info("最终回复（前300字）: %s", text[:300])
-                # 保存本轮到历史（仅保留纯文本，不包含工具调用中间步骤）
+                # 保存本轮到历史（仅保留纯文本，不包含工具调用中间步骤；图片消息存摘要文本）
                 new_history = history + [
-                    {"role": "user", "content": msg.clean_text},
+                    {"role": "user", "content": msg.clean_text or "[图片]"},
                     {"role": "assistant", "content": text},
                 ]
                 max_msgs = self._MAX_HISTORY_TURNS * 2
@@ -596,7 +599,7 @@ class PersonalAssistant:
                 model="claude-opus-4-6",
                 max_tokens=512,
                 system=system_prompt,
-                messages=[{"role": "user", "content": msg.clean_text}],
+                messages=[{"role": "user", "content": self._build_user_content(msg)}],
             )
             return self._extract_text(response)
         except Exception as e:
@@ -642,6 +645,22 @@ class PersonalAssistant:
 
         # 默认：读操作（搜索 / 查询 / 读取）
         return "read"
+
+    @staticmethod
+    @staticmethod
+    def _build_user_content(msg: "BotMessage"):
+        """构建发给 Claude 的用户消息内容：纯文本或含图片的多模态列表。"""
+        if not msg.image_data:
+            return msg.clean_text
+        blocks: list = []
+        for img in msg.image_data:
+            blocks.append({
+                "type": "image",
+                "source": {"type": "base64", "media_type": img["media_type"], "data": img["data"]},
+            })
+        if msg.clean_text.strip():
+            blocks.append({"type": "text", "text": msg.clean_text})
+        return blocks
 
     @staticmethod
     def _extract_text(response) -> str:

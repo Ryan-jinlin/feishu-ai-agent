@@ -164,6 +164,19 @@ def _fmt_ts(ts: int) -> str:
         return str(ts)
 
 
+def _detect_media_type(b: bytes) -> str:
+    """从字节头部判断图片 MIME 类型"""
+    if b[:8] == b'\x89PNG\r\n\x1a\n':
+        return "image/png"
+    if b[:2] == b'\xff\xd8':
+        return "image/jpeg"
+    if b[:4] == b'GIF8':
+        return "image/gif"
+    if b[:4] == b'RIFF' and b[8:12] == b'WEBP':
+        return "image/webp"
+    return "image/jpeg"
+
+
 def _parse_message(data: P2ImMessageReceiveV1) -> BotMessage | None:
     """将 lark_oapi 事件转换为 BotMessage"""
     try:
@@ -192,6 +205,23 @@ def _parse_message(data: P2ImMessageReceiveV1) -> BotMessage | None:
                 raw_text="",
                 clean_text="[转发消息]",
                 forward_msg_id=forward_msg_id,
+            )
+
+        # ── 图片消息 ──────────────────────────────────────────────────────
+        if message.message_type == "image":
+            try:
+                img_content = json.loads(message.content or "{}")
+            except json.JSONDecodeError:
+                img_content = {}
+            image_key = img_content.get("image_key", "")
+            return BotMessage(
+                message_id=message.message_id or "",
+                sender_open_id=sender_open_id,
+                chat_id=message.chat_id or "",
+                chat_type=message.chat_type or "p2p",
+                raw_text="",
+                clean_text="",
+                image_keys=[image_key] if image_key else [],
             )
 
         if message.message_type not in ("text", "post"):
@@ -373,8 +403,8 @@ def do_p2_im_message_receive_v1(data: P2ImMessageReceiveV1) -> None:
             feishu.reply_message(msg.message_id, "已清除对话历史，下一条消息将开始全新对话。")
             return
 
-        # 空消息忽略
-        if not msg.clean_text.strip():
+        # 空消息忽略（纯图片消息 clean_text 为空但 image_keys 不为空，不忽略）
+        if not msg.clean_text.strip() and not msg.image_keys:
             return
 
         # 立即回复确认，防止 WS 事件循环被长耗时任务阻塞导致 ping_timeout
@@ -382,6 +412,21 @@ def do_p2_im_message_receive_v1(data: P2ImMessageReceiveV1) -> None:
 
         def _process_in_background() -> None:
             try:
+                import base64 as _b64
+
+                # ── 下载图片，填充 image_data ──────────────────────────────────
+                if msg.image_keys:
+                    for img_key in msg.image_keys:
+                        img_bytes = feishu.download_message_resource(msg.message_id, img_key)
+                        if img_bytes:
+                            msg.image_data.append({
+                                "data": _b64.b64encode(img_bytes).decode(),
+                                "media_type": _detect_media_type(img_bytes),
+                            })
+                    if not msg.image_data:
+                        feishu.reply_card(msg.message_id, "图片下载失败，请稍后重试。")
+                        return
+
                 # ── 合并转发：先获取转发内容，注入 clean_text 让 Claude 做摘要 ──
                 if msg.forward_msg_id:
                     fwd_msgs = feishu.get_merge_forward_messages(msg.forward_msg_id)

@@ -35,6 +35,8 @@ class BotMessage:
     clean_text: str             # 去除 @机器人 后的干净文本
     mentions: list[MentionedUser] = field(default_factory=list)
     forward_msg_id: str = ""    # 合并转发消息的 create_message_id（非空时表示是转发）
+    image_keys: list[str] = field(default_factory=list)   # 图片消息的 image_key 列表
+    image_data: list[dict] = field(default_factory=list)  # 已下载的图片 {"data": b64, "media_type": "image/jpeg"}
 
 
 class FeishuBotEventParser:
@@ -144,6 +146,23 @@ class FeishuBotEventParser:
                 raw_text="",
                 clean_text="[转发消息]",
                 forward_msg_id=forward_msg_id,
+            )
+
+        # ── 图片消息 ───────────────────────────────────────────────────────
+        if message_type == "image":
+            try:
+                img_content = json.loads(content_str)
+            except json.JSONDecodeError:
+                img_content = {}
+            image_key = img_content.get("image_key", "")
+            return BotMessage(
+                message_id=message_id,
+                sender_open_id=sender_open_id,
+                chat_id=chat_id,
+                chat_type=chat_type,
+                raw_text="",
+                clean_text="",
+                image_keys=[image_key] if image_key else [],
             )
 
         if message_type not in ("text", "post"):

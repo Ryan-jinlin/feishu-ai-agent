@@ -438,6 +438,22 @@ class FeishuClient:
             logger.warning("reply_card 异常，降级为文本: %s", exc)
             return self.reply_message(message_id, text)
 
+    def download_message_resource(self, message_id: str, file_key: str) -> bytes | None:
+        """下载消息中的图片资源，返回原始字节；失败返回 None。"""
+        try:
+            resp = requests.get(
+                f"{FEISHU_HOST}/open-apis/im/v1/messages/{message_id}/resources/{file_key}",
+                params={"type": "image"},
+                headers=self._headers(),
+                timeout=30,
+            )
+            if resp.status_code == 200:
+                return resp.content
+            logger.warning("download_message_resource 失败: %s %s", resp.status_code, resp.text[:200])
+        except Exception as e:
+            logger.warning("download_message_resource 异常: %s", e)
+        return None
+
     def download_drive_file(self, obj_token: str) -> bytes | None:
         """下载飞书 Drive 文件，返回原始字节；失败返回 None。"""
         try:
