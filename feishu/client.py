@@ -963,6 +963,56 @@ class FeishuClient:
         return result
 
     # ------------------------------------------------------------------ #
+    # Task
+    # ------------------------------------------------------------------ #
+
+    def create_task(
+        self,
+        title: str,
+        description: str = "",
+        due_ms: int | None = None,
+        assignee_open_ids: list[str] | None = None,
+        follower_open_ids: list[str] | None = None,
+    ) -> dict:
+        """创建飞书任务（Task v2）。返回 {task_id, url, summary}。
+        需要应用权限：task:task:write。
+        assignee_open_ids 仅支持内部用户（同租户）。
+        """
+        members: list[dict] = []
+        for oid in (assignee_open_ids or []):
+            if oid:
+                members.append({"id": oid, "type": "user", "role": "assignee"})
+        for oid in (follower_open_ids or []):
+            if oid:
+                members.append({"id": oid, "type": "user", "role": "follower"})
+
+        body: dict = {"summary": title}
+        if members:
+            body["members"] = members
+        if description:
+            body["description"] = description
+        if due_ms is not None:
+            body["due"] = {"timestamp": str(due_ms), "is_all_day": False}
+
+        resp = requests.post(
+            f"{FEISHU_HOST}/open-apis/task/v2/tasks",
+            headers=self._headers(),
+            params={"user_id_type": "open_id"},
+            json=body,
+            timeout=15,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        if data.get("code") != 0:
+            raise RuntimeError(f"创建飞书任务失败 code={data.get('code')}: {data.get('msg', '')}")
+        task = data.get("data", {}).get("task", {})
+        return {
+            "task_id": task.get("guid", ""),
+            "url": task.get("url", ""),
+            "summary": task.get("summary", title),
+        }
+
+    # ------------------------------------------------------------------ #
     # Wiki
     # ------------------------------------------------------------------ #
 

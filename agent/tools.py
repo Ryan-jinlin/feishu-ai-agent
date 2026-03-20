@@ -325,7 +325,10 @@ TOOL_DEFINITIONS = [
             "• inspect_pptx — 列出 PPTX 每页所有形状的坐标（英寸）、文字预览，用于了解结构后再做精确修改\n"
             "• edit_pptx — 下载飞书云盘中的 PPTX，在原文件上做文本替换 + 形状位置/尺寸调整（保留格式），保存到本地。\n"
             "  修改形状位置时先用 inspect_pptx 获取 slide_index 和 shape_index，再传入 shape_updates。\n"
-            "  需要 obj_token（从 read_page 结果末尾的【文件 token：xxx】获取）\n\n"
+            "  需要 obj_token（从 read_page 结果末尾的【文件 token：xxx】获取）\n"
+            "• create_task — 创建飞书任务并指定负责人/关注者。\n"
+            "  内部用户（同公司飞书账号）：task_assignee_open_ids 填 open_id 列表（先用 search_users 查）。\n"
+            "  外部用户：无法通过 open_id 分配，可将外部用户姓名写入 task_description，并用 send_message 单独通知。\n\n"
             "典型工作流：search → read_page（了解内容）→ create_page / edit_page（写入）\n"
             "修改 PPTX 时序图工作流：read_page（获取 obj_token）→ inspect_pptx（查看形状坐标）→ edit_pptx（替换文字 + 移动形状）"
         ),
@@ -334,7 +337,7 @@ TOOL_DEFINITIONS = [
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["search", "read_page", "list_pages", "create_page", "edit_page", "move_page", "send_message", "recall_message", "list_groups", "create_group", "delete_group", "get_group_members", "read_group_messages", "apply_mentions", "inspect_pptx", "edit_pptx"],
+                    "enum": ["search", "read_page", "list_pages", "create_page", "edit_page", "move_page", "send_message", "recall_message", "list_groups", "create_group", "delete_group", "get_group_members", "read_group_messages", "apply_mentions", "inspect_pptx", "edit_pptx", "create_task"],
                     "description": "操作类型",
                 },
                 "query": {
@@ -485,6 +488,31 @@ TOOL_DEFINITIONS = [
                     "type": "string",
                     "description": "保存的文件名（action=edit_pptx 时可选，默认为 '修改后.pptx'）",
                     "default": "修改后.pptx",
+                },
+                "task_title": {
+                    "type": "string",
+                    "description": "任务标题（action=create_task 时必填）",
+                },
+                "task_description": {
+                    "type": "string",
+                    "description": "任务详情/备注（action=create_task 时可选）。可在此注明无法通过 open_id 邀请的外部用户姓名",
+                    "default": "",
+                },
+                "task_due": {
+                    "type": "string",
+                    "description": "截止时间（action=create_task 时可选），格式：'2026-03-21 18:00' 或 '2026-03-21'（上海时间）",
+                },
+                "task_assignee_open_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "负责人的飞书 open_id 列表（action=create_task 时可选）。仅支持内部用户，先用 search_users 查询 open_id",
+                    "default": [],
+                },
+                "task_follower_open_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "关注者（抄送）的飞书 open_id 列表（action=create_task 时可选）。仅支持内部用户",
+                    "default": [],
                 },
             },
             "required": ["action"],
@@ -1200,6 +1228,11 @@ class ToolExecutor:
         output_filename: str = "修改后.pptx",
         group_name: str = "",
         member_open_ids: list | None = None,
+        task_title: str = "",
+        task_description: str = "",
+        task_due: str = "",
+        task_assignee_open_ids: list | None = None,
+        task_follower_open_ids: list | None = None,
     ) -> str:
         """统一分发飞书知识库操作"""
         if action == "search":
@@ -1478,7 +1511,46 @@ class ToolExecutor:
             if not replacements and not shape_updates:
                 return "错误：edit_pptx 需要提供 replacements（文本替换）或 shape_updates（形状调整）中至少一个。"
             return self._edit_pptx_in_place(obj_token, replacements or [], shape_updates or [], output_filename)
-        return f"未知 feishu_action: {action}。支持: search, read_page, list_pages, create_page, edit_page, move_page, send_message, recall_message, list_groups, create_group（group_name + member_open_ids）, get_group_members（chat_id）, read_group_messages（chat_id 或 p2p_open_id；hours 或 start_time+end_time）, apply_mentions, inspect_pptx, edit_pptx"
+        if action == "create_task":
+            if not task_title:
+                return "错误：create_task 操作需要提供 task_title 参数。"
+            # 解析截止时间 → Unix 毫秒
+            due_ms: int | None = None
+            if task_due:
+                import pytz as _pytz
+                _tz = _pytz.timezone("Asia/Shanghai")
+                _parsed = None
+                for _fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
+                    try:
+                        from datetime import datetime as _dt
+                        _parsed = _dt.strptime(task_due, _fmt)
+                        break
+                    except ValueError:
+                        continue
+                if _parsed is None:
+                    return f"错误：无法解析截止时间 '{task_due}'，请使用格式：'2026-03-21 18:00' 或 '2026-03-21'。"
+                due_ms = int(_tz.localize(_parsed).timestamp() * 1000)
+            try:
+                result = self.feishu.create_task(
+                    title=task_title,
+                    description=task_description or "",
+                    due_ms=due_ms,
+                    assignee_open_ids=task_assignee_open_ids or [],
+                    follower_open_ids=task_follower_open_ids or [],
+                )
+                assignee_n = len(task_assignee_open_ids or [])
+                follower_n = len(task_follower_open_ids or [])
+                due_note = f"\n截止时间：{task_due}" if task_due else ""
+                return (
+                    f"任务已创建！\n"
+                    f"标题：{result['summary']}{due_note}\n"
+                    f"负责人：{assignee_n} 人，关注者：{follower_n} 人\n"
+                    f"任务链接：{result['url']}\n"
+                    f"[task_id={result['task_id']}]"
+                )
+            except Exception as e:
+                return f"创建飞书任务失败：{e}\n提示：请确认应用已开启 task:task:write 权限，并在飞书开放平台重新发布。"
+        return f"未知 feishu_action: {action}。支持: search, read_page, list_pages, create_page, edit_page, move_page, send_message, recall_message, list_groups, create_group（group_name + member_open_ids）, get_group_members（chat_id）, read_group_messages（chat_id 或 p2p_open_id；hours 或 start_time+end_time）, apply_mentions, inspect_pptx, edit_pptx, create_task"
 
     def _run_feishu_cli(self, *args: str, timeout: int = 30) -> str:
         """调用 feishu-sync-cli，返回 stdout 字符串；失败时自动重试最多 2 次"""
