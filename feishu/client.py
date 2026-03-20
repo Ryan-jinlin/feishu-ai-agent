@@ -590,24 +590,52 @@ class FeishuClient:
 
     def send_text_to_chat(self, chat_id: str, text: str) -> str:
         """向群聊发送文本消息（text 中可含 <at user_id="open_id">姓名</at> @mention）。
+        Bot 不在群内时自动 fallback 到用户 IM token（以用户身份发送）。
         返回 message_id（成功）或空字符串（失败）。"""
-        resp = requests.post(
+        payload = {
+            "receive_id": chat_id,
+            "content": json.dumps({"text": text}),
+            "msg_type": "text",
+        }
+        params = {"receive_id_type": "chat_id"}
+        # 先用 Bot token 尝试
+        try:
+            resp = requests.post(
+                f"{FEISHU_HOST}/open-apis/im/v1/messages",
+                headers=self._headers(),
+                params=params,
+                json=payload,
+                timeout=10,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            if data.get("code") == 0:
+                return data.get("data", {}).get("message_id", "") or ""
+            logger.warning("send_text_to_chat Bot token 失败 code=%s，尝试用户 IM token", data.get("code"))
+        except requests.HTTPError as e:
+            if e.response is None or e.response.status_code not in (400, 403):
+                raise
+            logger.warning("send_text_to_chat Bot token HTTP %s，尝试用户 IM token",
+                           e.response.status_code)
+        # Fallback：用用户 IM token（Bot 不在群、但用户在群内）
+        user_headers = self._user_im_headers()
+        if not user_headers:
+            logger.error("send_text_to_chat：Bot token 失败且无用户 IM token，无法发送")
+            return ""
+        resp2 = requests.post(
             f"{FEISHU_HOST}/open-apis/im/v1/messages",
-            headers=self._headers(),
-            params={"receive_id_type": "chat_id"},
-            json={
-                "receive_id": chat_id,
-                "content": json.dumps({"text": text}),
-                "msg_type": "text",
-            },
+            headers={**user_headers, "Content-Type": "application/json"},
+            params=params,
+            json=payload,
             timeout=10,
         )
-        resp.raise_for_status()
-        data = resp.json()
-        if data.get("code") != 0:
-            logger.error("发送群消息失败: %s", data)
+        resp2.raise_for_status()
+        data2 = resp2.json()
+        if data2.get("code") != 0:
+            logger.error("send_text_to_chat 用户 IM token 也失败: %s", data2)
             return ""
-        return data.get("data", {}).get("message_id", "") or ""
+        logger.info("send_text_to_chat：已用用户 IM token 以用户身份发送到群 %s", chat_id)
+        return data2.get("data", {}).get("message_id", "") or ""
 
     def recall_message(self, message_id: str) -> bool:
         """撤回（删除）指定消息 DELETE /open-apis/im/v1/messages/{message_id}"""
