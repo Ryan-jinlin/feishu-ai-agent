@@ -942,13 +942,15 @@ class FeishuClient:
             if not refresh_token:
                 logger.warning("user_im_token 已过期且无 refresh_token，请重新运行授权脚本")
                 return None
-            import base64 as _b64
-            basic = _b64.b64encode(
-                f"{self.app_id}:{self.app_secret}".encode()
-            ).decode()
+            _app_tok_resp = requests.post(
+                f"{FEISHU_HOST}/open-apis/auth/v3/app_access_token/internal",
+                json={"app_id": self.app_id, "app_secret": self.app_secret},
+                timeout=15,
+            )
+            _app_tok = _app_tok_resp.json().get("app_access_token", "")
             resp = requests.post(
                 f"{FEISHU_HOST}/open-apis/authen/v1/oidc/refresh_access_token",
-                headers={"Authorization": f"Basic {basic}", "Content-Type": "application/json"},
+                headers={"Authorization": f"Bearer {_app_tok}", "Content-Type": "application/json"},
                 json={"grant_type": "refresh_token", "refresh_token": refresh_token},
                 timeout=15,
             )

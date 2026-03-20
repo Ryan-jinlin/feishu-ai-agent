@@ -11,7 +11,6 @@
 """
 from __future__ import annotations
 
-import base64
 import http.server
 import json
 import os
@@ -85,15 +84,25 @@ def _start_callback_server() -> http.server.HTTPServer:
 
 
 # ── Token 交换 ────────────────────────────────────────────────────────
-def _basic_auth() -> str:
-    return base64.b64encode(f"{APP_ID}:{APP_SECRET}".encode()).decode()
+def _get_app_access_token() -> str:
+    resp = requests.post(
+        f"{FEISHU_HOST}/open-apis/auth/v3/app_access_token/internal",
+        json={"app_id": APP_ID, "app_secret": APP_SECRET},
+        timeout=15,
+    )
+    data = resp.json()
+    token = data.get("app_access_token", "")
+    if not token:
+        raise RuntimeError(f"获取 app_access_token 失败: {data}")
+    return token
 
 
 def _exchange_code(code: str) -> dict:
+    app_token = _get_app_access_token()
     resp = requests.post(
-        f"{FEISHU_HOST}/open-apis/authen/v1/oidc/access_token",
+        f"{FEISHU_HOST}/open-apis/authen/v1/access_token",
         headers={
-            "Authorization": f"Basic {_basic_auth()}",
+            "Authorization": f"Bearer {app_token}",
             "Content-Type": "application/json",
         },
         json={"grant_type": "authorization_code", "code": code},
