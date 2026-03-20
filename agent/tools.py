@@ -1501,6 +1501,7 @@ class ToolExecutor:
                 start_ts = end_ts - hours * 3600
             msgs = []
             source = "API"
+            api_error_note = ""
             try:
                 msgs = self.feishu.get_group_messages(chat_id, start_ts, end_ts, max_msgs=300)
                 if msgs:
@@ -1518,6 +1519,7 @@ class ToolExecutor:
                         source = "用户身份API"
                 except Exception as ue:
                     logger.warning("get_group_messages_as_user 失败: %s", ue)
+                    api_error_note = f"（API 错误：{ue}）"
             # 最终降级到本地消息缓存
             if not msgs and self._message_cache:
                 msgs = self._message_cache.get_messages(chat_id, start_ts, end_ts, max_msgs=300)
@@ -1528,7 +1530,7 @@ class ToolExecutor:
             else:
                 time_desc = f"最近 {hours} 小时"
             if not msgs:
-                return f"{time_desc} 内没有消息。"
+                return f"{time_desc} 内没有消息{api_error_note}。"
             lines = []
             for m in msgs:
                 mid = m.get("message_id", "")

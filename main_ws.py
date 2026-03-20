@@ -429,11 +429,19 @@ def do_p2_im_message_receive_v1(data: P2ImMessageReceiveV1) -> None:
 
                 # ── 合并转发：先获取转发内容，注入 clean_text 让 Claude 做摘要 ──
                 if msg.forward_msg_id:
-                    fwd_msgs = feishu.get_merge_forward_messages(msg.forward_msg_id)
+                    try:
+                        fwd_msgs = feishu.get_merge_forward_messages(msg.forward_msg_id)
+                    except RuntimeError as api_err:
+                        feishu.reply_card(
+                            msg.message_id,
+                            f"无法读取转发的消息内容（{api_err}）。\n\n"
+                            "可能原因：Bot 应用未开启 im:message:readonly 权限，或该转发消息不在 Bot 的访问范围内。",
+                        )
+                        return
                     if not fwd_msgs:
                         feishu.reply_card(
                             msg.message_id,
-                            "无法读取转发的消息内容，请确认 Bot 有读取权限（需要 im:message:readonly）。",
+                            "转发的消息中没有文本内容（可能全部为图片或表情包）。",
                         )
                         return
                     lines = [

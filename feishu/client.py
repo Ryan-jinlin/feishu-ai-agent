@@ -1161,11 +1161,12 @@ class FeishuClient:
                 )
                 data = resp.json()
                 if data.get("code") != 0:
+                    err = f"code={data.get('code')} msg={data.get('msg', '')}"
                     logger.warning(
-                        "get_group_messages_as_user [%s] API错误 code=%s msg=%s",
-                        chat_id, data.get("code"), data.get("msg", ""),
+                        "get_group_messages_as_user [%s] API错误 %s",
+                        chat_id, err,
                     )
-                    break
+                    raise RuntimeError(f"用户 IM token 读取群消息失败：{err}")
                 items = data.get("data", {}).get("items", [])
                 kept = 0
                 skipped_types: dict[str, int] = {}
@@ -1661,7 +1662,10 @@ class FeishuClient:
         Bot token 失败时自动尝试用户 IM token（转发消息来自 Bot 不在的群时需要）。
         返回 [{sender_name, text, ts, message_id}]
         """
-        def _fetch(headers: dict) -> list[dict]:
+        last_err: list[str] = []  # 捕获最后一次 API 错误信息
+
+        def _fetch(headers: dict) -> list[dict] | None:
+            """返回消息列表；API 错误时返回 None（区别于空列表）。"""
             messages: list[dict] = []
             page_token = ""
             while len(messages) < max_msgs:
@@ -1681,11 +1685,13 @@ class FeishuClient:
                 )
                 data = resp.json()
                 if data.get("code") != 0:
+                    err = f"code={data.get('code')} msg={data.get('msg', '')}"
                     logger.warning(
-                        "get_merge_forward_messages [%s] API错误 code=%s msg=%s",
-                        create_message_id, data.get("code"), data.get("msg", ""),
+                        "get_merge_forward_messages [%s] API错误 %s",
+                        create_message_id, err,
                     )
-                    return []  # 信号：此 token 失败
+                    last_err.append(err)
+                    return None  # 区别于"成功但空"
                 items = data.get("data", {}).get("items", [])
                 messages.extend(self._parse_im_messages(items))
                 logger.info(
@@ -1698,10 +1704,11 @@ class FeishuClient:
             return messages
 
         # 1. 先用 bot token 尝试
+        bot_result: list[dict] | None = None
         try:
-            msgs = _fetch(self._headers())
-            if msgs is not None and len(msgs) > 0:
-                return msgs
+            bot_result = _fetch(self._headers())
+            if bot_result:  # 有消息直接返回
+                return bot_result
         except Exception as e:
             logger.error("get_merge_forward_messages bot token 异常: %s", e)
 
@@ -1709,12 +1716,25 @@ class FeishuClient:
         user_headers = self._user_im_headers()
         if not user_headers:
             logger.warning("get_merge_forward_messages: 无用户 IM token，无法降级")
+            # bot_result 是 [] 表示成功但无文本消息；None 表示 API 错误
+            if bot_result is None and last_err:
+                raise RuntimeError(f"API 错误：{last_err[-1]}")
             return []
         logger.info("get_merge_forward_messages: bot token 无结果，尝试用户 IM token")
         try:
-            return _fetch(user_headers) or []
+            user_result = _fetch(user_headers)
+            if user_result:
+                return user_result
+            # 两个 token 都无结果
+            if last_err:
+                raise RuntimeError(f"API 错误：{last_err[-1]}")
+            return []
+        except RuntimeError:
+            raise
         except Exception as e:
             logger.error("get_merge_forward_messages user token 异常: %s", e)
+            if last_err:
+                raise RuntimeError(f"API 错误：{last_err[-1]}")
             return []
 
     def _extract_post_text(self, content: dict) -> str:
