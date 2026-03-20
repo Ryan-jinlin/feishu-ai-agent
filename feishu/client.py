@@ -1162,13 +1162,18 @@ class FeishuClient:
                 data = resp.json()
                 if data.get("code") != 0:
                     logger.warning(
-                        "get_group_messages_as_user [%s] 失败: %s", chat_id, data
+                        "get_group_messages_as_user [%s] API错误 code=%s msg=%s",
+                        chat_id, data.get("code"), data.get("msg", ""),
                     )
                     break
-                for item in data.get("data", {}).get("items", []):
+                items = data.get("data", {}).get("items", [])
+                kept = 0
+                skipped_types: dict[str, int] = {}
+                for item in items:
                     try:
                         msg_type = item.get("msg_type", "")
                         if msg_type not in ("text", "post"):
+                            skipped_types[msg_type] = skipped_types.get(msg_type, 0) + 1
                             continue
                         body = item.get("body", {})
                         content_str = body.get("content", "{}")
@@ -1190,9 +1195,14 @@ class FeishuClient:
                             "text": text,
                             "ts": int(item.get("create_time", "0")),
                         })
+                        kept += 1
                     except Exception as item_err:
                         logger.warning("跳过单条消息解析失败: %s", item_err)
                         continue
+                logger.info(
+                    "get_group_messages_as_user [%s] 本页 %d 条, 保留 %d 条, 跳过类型: %s",
+                    chat_id, len(items), kept, skipped_types or "无",
+                )
                 if not data.get("data", {}).get("has_more"):
                     break
                 page_token = data["data"].get("page_token", "")
@@ -1607,73 +1617,105 @@ class FeishuClient:
                 break
         return messages
 
+    def _parse_im_messages(self, items: list[dict]) -> list[dict]:
+        """将 Feishu IM messages API 返回的 items 解析为 [{message_id, sender_name, text, ts}]。"""
+        result: list[dict] = []
+        skipped_types: dict[str, int] = {}
+        for item in items:
+            try:
+                msg_type = item.get("msg_type", "")
+                if msg_type not in ("text", "post"):
+                    skipped_types[msg_type] = skipped_types.get(msg_type, 0) + 1
+                    continue
+                body = item.get("body", {})
+                content_str = body.get("content", "{}")
+                try:
+                    content = json.loads(content_str)
+                except Exception:
+                    content = {}
+                if msg_type == "text":
+                    text = content.get("text", "").strip()
+                else:
+                    text = self._extract_post_text(content)
+                if not text:
+                    continue
+                sender_id = item.get("sender", {}).get("id", "")
+                sender_name = self._resolve_sender_name(sender_id)
+                result.append({
+                    "message_id": item.get("message_id", ""),
+                    "sender_name": sender_name,
+                    "text": text,
+                    "ts": int(item.get("create_time", "0")),
+                })
+            except Exception as item_err:
+                logger.warning("跳过单条消息解析失败: %s", item_err)
+        if skipped_types:
+            logger.debug("跳过非文本消息类型: %s", skipped_types)
+        return result
+
     def get_merge_forward_messages(
         self, create_message_id: str, max_msgs: int = 300
     ) -> list[dict]:
         """读取合并转发消息包内的原始消息列表。
         使用 container_id_type=merge_forward_chat，container_id=create_message_id。
+        Bot token 失败时自动尝试用户 IM token（转发消息来自 Bot 不在的群时需要）。
         返回 [{sender_name, text, ts, message_id}]
         """
-        messages: list[dict] = []
-        page_token = ""
-        while len(messages) < max_msgs:
-            params: dict = {
-                "container_id_type": "merge_forward_chat",
-                "container_id": create_message_id,
-                "sort_type": "ByCreateTimeAsc",
-                "page_size": 50,
-            }
-            if page_token:
-                params["page_token"] = page_token
-            try:
+        def _fetch(headers: dict) -> list[dict]:
+            messages: list[dict] = []
+            page_token = ""
+            while len(messages) < max_msgs:
+                params: dict = {
+                    "container_id_type": "merge_forward_chat",
+                    "container_id": create_message_id,
+                    "sort_type": "ByCreateTimeAsc",
+                    "page_size": 50,
+                }
+                if page_token:
+                    params["page_token"] = page_token
                 resp = requests.get(
                     f"{FEISHU_HOST}/open-apis/im/v1/messages",
-                    headers=self._headers(),
+                    headers=headers,
                     params=params,
                     timeout=15,
                 )
                 data = resp.json()
                 if data.get("code") != 0:
                     logger.warning(
-                        "get_merge_forward_messages [%s] 失败: %s",
-                        create_message_id, data,
+                        "get_merge_forward_messages [%s] API错误 code=%s msg=%s",
+                        create_message_id, data.get("code"), data.get("msg", ""),
                     )
-                    break
-                for item in data.get("data", {}).get("items", []):
-                    try:
-                        msg_type = item.get("msg_type", "")
-                        if msg_type not in ("text", "post"):
-                            continue
-                        body = item.get("body", {})
-                        content_str = body.get("content", "{}")
-                        try:
-                            content = json.loads(content_str)
-                        except Exception:
-                            content = {}
-                        if msg_type == "text":
-                            text = content.get("text", "").strip()
-                        else:
-                            text = self._extract_post_text(content)
-                        if not text:
-                            continue
-                        sender_id = item.get("sender", {}).get("id", "")
-                        sender_name = self._resolve_sender_name(sender_id)
-                        messages.append({
-                            "message_id": item.get("message_id", ""),
-                            "sender_name": sender_name,
-                            "text": text,
-                            "ts": int(item.get("create_time", "0")),
-                        })
-                    except Exception as item_err:
-                        logger.warning("跳过单条消息解析失败: %s", item_err)
-                        continue
+                    return []  # 信号：此 token 失败
+                items = data.get("data", {}).get("items", [])
+                messages.extend(self._parse_im_messages(items))
+                logger.info(
+                    "get_merge_forward_messages [%s] 本页 %d 条原始消息, 累计保留 %d 条",
+                    create_message_id, len(items), len(messages),
+                )
                 if not data.get("data", {}).get("has_more"):
                     break
                 page_token = data["data"].get("page_token", "")
-            except Exception as e:
-                logger.error("get_merge_forward_messages 异常: %s", e)
-                break
-        return messages
+            return messages
+
+        # 1. 先用 bot token 尝试
+        try:
+            msgs = _fetch(self._headers())
+            if msgs is not None and len(msgs) > 0:
+                return msgs
+        except Exception as e:
+            logger.error("get_merge_forward_messages bot token 异常: %s", e)
+
+        # 2. 降级为用户 IM token（转发消息来自 Bot 不在的群时）
+        user_headers = self._user_im_headers()
+        if not user_headers:
+            logger.warning("get_merge_forward_messages: 无用户 IM token，无法降级")
+            return []
+        logger.info("get_merge_forward_messages: bot token 无结果，尝试用户 IM token")
+        try:
+            return _fetch(user_headers) or []
+        except Exception as e:
+            logger.error("get_merge_forward_messages user token 异常: %s", e)
+            return []
 
     def _extract_post_text(self, content: dict) -> str:
         """从 post 消息内容中提取纯文本"""
