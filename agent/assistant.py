@@ -647,7 +647,6 @@ class PersonalAssistant:
         return "read"
 
     @staticmethod
-    @staticmethod
     def _build_user_content(msg: "BotMessage"):
         """构建发给 Claude 的用户消息内容：纯文本或含图片的多模态列表。"""
         if not msg.image_data:
