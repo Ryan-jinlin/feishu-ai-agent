@@ -46,7 +46,7 @@ if not APP_ID or not APP_SECRET:
     sys.exit(1)
 
 REDIRECT_URI = "http://localhost:19999/callback"
-SCOPE        = "im:message:readonly"
+SCOPE        = "im:message:readonly im:message.group_msg:get_as_user im:chat:readonly"
 TOKEN_FILE   = os.path.join(_BASE_DIR, ".user_im_token.json")
 FEISHU_HOST  = "https://open.feishu.cn"
 

@@ -37,6 +37,7 @@ class BotMessage:
     forward_msg_id: str = ""    # 合并转发消息的 create_message_id（非空时表示是转发）
     image_keys: list[str] = field(default_factory=list)   # 图片消息的 image_key 列表
     image_data: list[dict] = field(default_factory=list)  # 已下载的图片 {"data": b64, "media_type": "image/jpeg"}
+    thread_id: str = ""  # 消息所在话题的 thread_id（非空时表示是话题中的消息）
 
 
 class FeishuBotEventParser:

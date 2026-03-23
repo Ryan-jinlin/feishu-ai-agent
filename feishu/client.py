@@ -1573,15 +1573,15 @@ class FeishuClient:
                 )
                 data = resp.json()
                 if data.get("code") != 0:
-                    logger.warning("get_group_messages [%s] 失败: %s", chat_id, data)
-                    # 权限错误时尝试用用户 token 重试
-                    if not messages:
-                        user_msgs = self.get_group_messages_as_user(
-                            chat_id, start_ts, end_ts, max_msgs
+                    code = data.get("code")
+                    msg  = data.get("msg", "")
+                    logger.warning("get_group_messages [%s] 失败: code=%s %s", chat_id, code, msg)
+                    if code == 230002:
+                        raise RuntimeError(
+                            f"Bot 不在群 {chat_id} 内，无法读取消息。"
+                            "请先将 Bot 加入该群，或将需要总结的聊天记录【合并转发】给我。"
                         )
-                        if user_msgs:
-                            return user_msgs
-                    break
+                    raise RuntimeError(f"读取群消息失败（code={code} msg={msg}）")
                 for item in data.get("data", {}).get("items", []):
                     try:
                         msg_type = item.get("msg_type", "")
@@ -1606,6 +1606,7 @@ class FeishuClient:
                             "sender_name": sender_name,
                             "text": text,
                             "ts": int(item.get("create_time", "0")),
+                            "thread_id": item.get("thread_id") or "",
                         })
                     except Exception as item_err:
                         logger.warning("跳过单条消息解析失败: %s", item_err)
@@ -1616,7 +1617,22 @@ class FeishuClient:
             except Exception as e:
                 logger.error("get_group_messages 异常: %s", e)
                 break
-        return messages
+        # 获取话题（thread）回复，拼入父消息之后
+        result: list[dict] = []
+        seen_thread_ids: set[str] = set()
+        for msg in messages:
+            result.append(msg)
+            tid = msg.get("thread_id", "")
+            if tid and tid not in seen_thread_ids:
+                seen_thread_ids.add(tid)
+                thread_replies = self.get_thread_messages(tid, parent_message_id=msg["message_id"])
+                for tr in thread_replies:
+                    tr["is_thread_reply"] = True
+                    result.append(tr)
+        if seen_thread_ids:
+            logger.info("get_group_messages [%s] 共 %d 条主消息，%d 个话题，%d 条合计",
+                        chat_id, len(messages), len(seen_thread_ids), len(result))
+        return result
 
     def _parse_im_messages(self, items: list[dict]) -> list[dict]:
         """将 Feishu IM messages API 返回的 items 解析为 [{message_id, sender_name, text, ts}]。"""
@@ -1658,83 +1674,90 @@ class FeishuClient:
         self, create_message_id: str, max_msgs: int = 300
     ) -> list[dict]:
         """读取合并转发消息包内的原始消息列表。
-        使用 container_id_type=merge_forward_chat，container_id=create_message_id。
-        Bot token 失败时自动尝试用户 IM token（转发消息来自 Bot 不在的群时需要）。
+        使用 GET /im/v1/messages/{message_id}，返回的 items 包含所有被转发的消息。
         返回 [{sender_name, text, ts, message_id}]
         """
-        last_err: list[str] = []  # 捕获最后一次 API 错误信息
-
         def _fetch(headers: dict) -> list[dict] | None:
             """返回消息列表；API 错误时返回 None（区别于空列表）。"""
-            messages: list[dict] = []
-            page_token = ""
-            while len(messages) < max_msgs:
-                params: dict = {
-                    "container_id_type": "merge_forward_chat",
-                    "container_id": create_message_id,
-                    "sort_type": "ByCreateTimeAsc",
-                    "page_size": 50,
-                }
-                if page_token:
-                    params["page_token"] = page_token
-                resp = requests.get(
-                    f"{FEISHU_HOST}/open-apis/im/v1/messages",
-                    headers=headers,
-                    params=params,
-                    timeout=15,
+            resp = requests.get(
+                f"{FEISHU_HOST}/open-apis/im/v1/messages/{create_message_id}",
+                headers=headers,
+                timeout=15,
+            )
+            data = resp.json()
+            if data.get("code") != 0:
+                err = f"code={data.get('code')} msg={data.get('msg', '')}"
+                logger.warning(
+                    "get_merge_forward_messages [%s] API错误 %s",
+                    create_message_id, err,
                 )
-                data = resp.json()
-                if data.get("code") != 0:
-                    err = f"code={data.get('code')} msg={data.get('msg', '')}"
-                    logger.warning(
-                        "get_merge_forward_messages [%s] API错误 %s",
-                        create_message_id, err,
-                    )
-                    last_err.append(err)
-                    return None  # 区别于"成功但空"
-                items = data.get("data", {}).get("items", [])
-                messages.extend(self._parse_im_messages(items))
-                logger.info(
-                    "get_merge_forward_messages [%s] 本页 %d 条原始消息, 累计保留 %d 条",
-                    create_message_id, len(items), len(messages),
-                )
-                if not data.get("data", {}).get("has_more"):
-                    break
-                page_token = data["data"].get("page_token", "")
+                return None
+            items = data.get("data", {}).get("items", [])
+            # 跳过第一条 merge_forward 包装消息，解析后续的实际消息
+            content_items = [i for i in items if i.get("msg_type") != "merge_forward"]
+            messages = self._parse_im_messages(content_items[:max_msgs])
+            logger.info(
+                "get_merge_forward_messages [%s] 共 %d 条消息, 保留 %d 条",
+                create_message_id, len(content_items), len(messages),
+            )
             return messages
 
         # 1. 先用 bot token 尝试
-        bot_result: list[dict] | None = None
-        try:
-            bot_result = _fetch(self._headers())
-            if bot_result:  # 有消息直接返回
-                return bot_result
-        except Exception as e:
-            logger.error("get_merge_forward_messages bot token 异常: %s", e)
+        bot_result = _fetch(self._headers())
+        if bot_result:
+            return bot_result
 
-        # 2. 降级为用户 IM token（转发消息来自 Bot 不在的群时）
+        # 2. bot token 失败时，尝试用户 IM token
         user_headers = self._user_im_headers()
         if not user_headers:
-            logger.warning("get_merge_forward_messages: 无用户 IM token，无法降级")
-            # bot_result 是 [] 表示成功但无文本消息；None 表示 API 错误
-            if bot_result is None and last_err:
-                raise RuntimeError(f"API 错误：{last_err[-1]}")
+            logger.warning("get_merge_forward_messages: bot token 无结果且无用户 IM token")
+            if bot_result is None:
+                raise RuntimeError("无法读取合并转发消息（Bot 无权限）")
             return []
         logger.info("get_merge_forward_messages: bot token 无结果，尝试用户 IM token")
+        user_result = _fetch(user_headers)
+        if user_result:
+            return user_result
+        if user_result is None:
+            raise RuntimeError("无法读取合并转发消息（Bot 和用户 token 均无权限）")
+        return []
+
+    def get_thread_messages(
+        self, thread_id: str, parent_message_id: str = "", max_msgs: int = 50
+    ) -> list[dict]:
+        """获取话题（thread）下的回复消息。
+        使用 GET /im/v1/messages?container_id_type=thread&container_id={thread_id}
+        返回 [{sender_name, text, ts, message_id}]（自动跳过与父消息重复的第一条）
+        """
+        params: dict = {
+            "container_id_type": "thread",
+            "container_id": thread_id,
+            "sort_type": "ByCreateTimeAsc",
+            "page_size": min(max_msgs, 50),
+        }
         try:
-            user_result = _fetch(user_headers)
-            if user_result:
-                return user_result
-            # 两个 token 都无结果
-            if last_err:
-                raise RuntimeError(f"API 错误：{last_err[-1]}")
-            return []
-        except RuntimeError:
-            raise
+            resp = requests.get(
+                f"{FEISHU_HOST}/open-apis/im/v1/messages",
+                headers=self._headers(),
+                params=params,
+                timeout=15,
+            )
+            data = resp.json()
+            if data.get("code") != 0:
+                logger.warning(
+                    "get_thread_messages [%s] 失败: code=%s %s",
+                    thread_id, data.get("code"), data.get("msg", ""),
+                )
+                return []
+            items = data.get("data", {}).get("items", [])
+            # 跳过父消息（thread 中第一条通常是父消息，与主频道重复）
+            if items and parent_message_id and items[0].get("message_id") == parent_message_id:
+                items = items[1:]
+            result = self._parse_im_messages(items[:max_msgs])
+            logger.info("get_thread_messages [%s] 获取 %d 条回复", thread_id, len(result))
+            return result
         except Exception as e:
-            logger.error("get_merge_forward_messages user token 异常: %s", e)
-            if last_err:
-                raise RuntimeError(f"API 错误：{last_err[-1]}")
+            logger.warning("get_thread_messages [%s] 异常: %s", thread_id, e)
             return []
 
     def _extract_post_text(self, content: dict) -> str:

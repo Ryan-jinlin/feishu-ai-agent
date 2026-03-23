@@ -38,6 +38,9 @@ PPT_TEMPLATE_PATH = os.path.join(_AGENT_BASE_DIR, "PPT模版.pptx")
 _SKILL_BASE_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".agents", "skills"
 )
+_FEISHU_DOC_SCRIPTS_DIR = os.path.join(
+    _AGENT_BASE_DIR, ".agents", "skills", "feishu-doc", "scripts"
+)
 _STREAM_CATALOG_PATH = os.path.join(
     _SKILL_BASE_DIR, "stream-helper", "data", "stream-catalog.json"
 )
@@ -328,7 +331,11 @@ TOOL_DEFINITIONS = [
             "  需要 obj_token（从 read_page 结果末尾的【文件 token：xxx】获取）\n"
             "• create_task — 创建飞书任务并指定负责人/关注者。\n"
             "  内部用户（同公司飞书账号）：task_assignee_open_ids 填 open_id 列表（先用 search_users 查）。\n"
-            "  外部用户：无法通过 open_id 分配，可将外部用户姓名写入 task_description，并用 send_message 单独通知。\n\n"
+            "  外部用户：无法通过 open_id 分配，可将外部用户姓名写入 task_description，并用 send_message 单独通知。\n"
+            "• create_doc — 将 Markdown 内容创建为飞书文档（docx），支持本地图片和 drawio 附件。\n"
+            "  需要 title + content（Markdown 文本）；ref_url 可选（指定目标知识库父页面，不填则创建到默认位置）。\n"
+            "• drawio_to_board — 将 drawio XML 转换为飞书画板（Board），可在飞书中可视化编辑。\n"
+            "  需要 title + drawio_content（drawio XML 文本）；ref_url 可选（指定目标知识库父页面）。\n\n"
             "典型工作流：search → read_page（了解内容）→ create_page / edit_page（写入）\n"
             "修改 PPTX 时序图工作流：read_page（获取 obj_token）→ inspect_pptx（查看形状坐标）→ edit_pptx（替换文字 + 移动形状）"
         ),
@@ -337,7 +344,7 @@ TOOL_DEFINITIONS = [
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["search", "read_page", "list_pages", "create_page", "edit_page", "move_page", "send_message", "recall_message", "list_groups", "create_group", "delete_group", "get_group_members", "read_group_messages", "apply_mentions", "inspect_pptx", "edit_pptx", "create_task"],
+                    "enum": ["search", "read_page", "list_pages", "create_page", "edit_page", "move_page", "send_message", "recall_message", "list_groups", "create_group", "delete_group", "get_group_members", "read_group_messages", "apply_mentions", "inspect_pptx", "edit_pptx", "create_task", "create_doc", "drawio_to_board"],
                     "description": "操作类型",
                 },
                 "query": {
@@ -513,6 +520,10 @@ TOOL_DEFINITIONS = [
                     "items": {"type": "string"},
                     "description": "关注者（抄送）的飞书 open_id 列表（action=create_task 时可选）。仅支持内部用户",
                     "default": [],
+                },
+                "drawio_content": {
+                    "type": "string",
+                    "description": "drawio XML 文本内容（action=drawio_to_board 时必填）",
                 },
             },
             "required": ["action"],
@@ -1280,6 +1291,7 @@ class ToolExecutor:
         task_due: str = "",
         task_assignee_open_ids: list | None = None,
         task_follower_open_ids: list | None = None,
+        drawio_content: str = "",
     ) -> str:
         """统一分发飞书知识库操作"""
         if action == "search":
@@ -1520,10 +1532,10 @@ class ToolExecutor:
                 except Exception as ue:
                     logger.warning("get_group_messages_as_user 失败: %s", ue)
                     ue_str = str(ue)
-                    if "231204" in ue_str:
-                        api_error_note = "（提示：当前应用类型不支持以用户身份读取群消息。需将 Bot 加入该群，Bot 才能直接读取消息）"
+                    if "231204" in ue_str or "99991679" in ue_str:
+                        api_error_note = "（提示：用户授权 token 缺少群消息权限，请重新运行 scripts/authorize_user_im.py 完成授权）"
                     elif "230002" in ue_str:
-                        api_error_note = "（提示：Bot 不在该群内。需将 Bot 加入该群才能读取消息）"
+                        api_error_note = "（提示：Bot 不在该群内，且用户授权 token 未就绪，请运行 scripts/authorize_user_im.py 完成授权）"
                     else:
                         api_error_note = f"（API 错误：{ue}）"
             # 最终降级到本地消息缓存
@@ -1539,9 +1551,12 @@ class ToolExecutor:
                 return f"{time_desc} 内没有消息{api_error_note}。"
             lines = []
             for m in msgs:
-                mid = m.get("message_id", "")
-                mid_str = f" [id:{mid}]" if mid else ""
-                lines.append(f"[{m.get('sender_name', '?')}]{mid_str} {m.get('text', '')}")
+                if m.get("is_thread_reply"):
+                    lines.append(f"  └ [{m.get('sender_name', '?')}](话题回复) {m.get('text', '')}")
+                else:
+                    mid = m.get("message_id", "")
+                    mid_str = f" [id:{mid}]" if mid else ""
+                    lines.append(f"[{m.get('sender_name', '?')}]{mid_str} {m.get('text', '')}")
             return f"{time_desc} 共 {len(msgs)} 条消息（来源：{source}）：\n\n" + "\n".join(lines)
         if action == "apply_mentions":
             if not url:
@@ -1605,7 +1620,55 @@ class ToolExecutor:
                 )
             except Exception as e:
                 return f"创建飞书任务失败：{e}\n提示：请确认应用已开启 task:task:write 权限，并在飞书开放平台重新发布。"
-        return f"未知 feishu_action: {action}。支持: search, read_page, list_pages, create_page, edit_page, move_page, send_message, recall_message, list_groups, create_group（group_name + member_open_ids）, get_group_members（chat_id）, read_group_messages（chat_id 或 p2p_open_id；hours 或 start_time+end_time）, apply_mentions, inspect_pptx, edit_pptx, create_task"
+        if action == "create_doc":
+            if not title or not content:
+                return "错误：create_doc 需要提供 title 和 content（Markdown）参数。"
+            script = os.path.join(_FEISHU_DOC_SCRIPTS_DIR, "md2feishu.py")
+            if not os.path.exists(script):
+                return f"错误：feishu-doc skill 未安装，找不到 {script}"
+            try:
+                with tempfile.NamedTemporaryFile(
+                    mode="w", suffix=".md", delete=False, encoding="utf-8"
+                ) as f:
+                    f.write(content)
+                    tmp_path = f.name
+                cmd = [sys.executable, script, "create", tmp_path, "--title", title]
+                if ref_url:
+                    cmd += ["--wiki", ref_url]
+                env = {**os.environ, "FEISHU_APP_ID": self.feishu.app_id, "FEISHU_APP_SECRET": self.feishu.app_secret}
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=60, env=env)
+                os.unlink(tmp_path)
+                output = (result.stdout or result.stderr or "").strip()
+                if result.returncode != 0:
+                    return f"创建飞书文档失败：\n{output[:2000]}"
+                return f"飞书文档已创建！\n{output[:1000]}"
+            except Exception as e:
+                return f"创建飞书文档失败：{e}"
+        if action == "drawio_to_board":
+            if not title or not drawio_content:
+                return "错误：drawio_to_board 需要提供 title 和 drawio_content（drawio XML）参数。"
+            script = os.path.join(_FEISHU_DOC_SCRIPTS_DIR, "drawio2board.py")
+            if not os.path.exists(script):
+                return f"错误：feishu-doc skill 未安装，找不到 {script}"
+            try:
+                with tempfile.NamedTemporaryFile(
+                    mode="w", suffix=".drawio", delete=False, encoding="utf-8"
+                ) as f:
+                    f.write(drawio_content)
+                    tmp_path = f.name
+                cmd = [sys.executable, script, "create", tmp_path, "--title", title]
+                if ref_url:
+                    cmd += ["--wiki", ref_url]
+                env = {**os.environ, "FEISHU_APP_ID": self.feishu.app_id, "FEISHU_APP_SECRET": self.feishu.app_secret}
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=60, env=env)
+                os.unlink(tmp_path)
+                output = (result.stdout or result.stderr or "").strip()
+                if result.returncode != 0:
+                    return f"drawio 转飞书画板失败：\n{output[:2000]}"
+                return f"飞书画板已创建！\n{output[:1000]}"
+            except Exception as e:
+                return f"drawio 转飞书画板失败：{e}"
+        return f"未知 feishu_action: {action}。支持: search, read_page, list_pages, create_page, edit_page, move_page, send_message, recall_message, list_groups, create_group, get_group_members, read_group_messages, apply_mentions, inspect_pptx, edit_pptx, create_task, create_doc, drawio_to_board"
 
     def _run_feishu_cli(self, *args: str, timeout: int = 30) -> str:
         """调用 feishu-sync-cli，返回 stdout 字符串；失败时自动重试最多 2 次"""

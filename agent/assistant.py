@@ -274,6 +274,10 @@ class PersonalAssistant:
 - **action=read_group_messages**：读取群或 P2P 私信最近 N 小时的消息（群用 chat_id，与某用户的私信用 p2p_open_id；可先 search_users 获取 open_id；可选 hours，默认 24）；每条消息会带 `[id:om_xxx]`，可用于撤回
 - 用途示例：更新项目状态、记录会议纪要、维护文档、发送通知、按需读取群/私信消息并总结
 
+**⚠️ 用户个人飞书空间（重要）**：当用户说"我的空间"、"我的个人空间"、"我的飞书空间"、"我的个人飞书空间"等类似表达时，目标位置统一指向：
+`https://momenta.feishu.cn/wiki/ZGMrwtnB5iJGSlkafMPcfv4XnCc`
+创建页面时使用 `ref_url=https://momenta.feishu.cn/wiki/ZGMrwtnB5iJGSlkafMPcfv4XnCc`，`position=child`（在该页面下创建子页面），禁止通过搜索来猜测用户的个人空间位置。
+
 **每日群摘要（自动后台任务）**：Bot 每天 00:00 自动读取所有群的昨日消息，生成摘要并发布到飞书知识库。首次处理某个群时会 DM 你确认存放位置。你也可以用 `feishu_action(list_groups + read_group_messages)` 按需读取任意群消息。
 
 ### 3. 客户汇报 PPT 生成
