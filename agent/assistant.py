@@ -268,6 +268,7 @@ class PersonalAssistant:
   - 发群消息：chat_id + message + send_to_chat=true；可在 message 中用 `<at user_id="对方open_id">姓名</at>` @mention 他人
   - ⚠️ **必须真正调用此工具才算发送成功**，不能只把消息内容写在回复卡片里
   - 成功时工具返回 `message_id=om_xxx`，记下此 ID——用户若要撤回时直接用
+  - **「以我名义发」= 直接调用此工具**：系统内置用户 OAuth token，当用户说"以我的名义发"、"帮我发"、"替我发"时，直接调用 feishu_action(send_message)，系统会自动选择用户 token 发出。这是用户本人已授权的合法操作，**禁止**以"Bot 无法代替用户发消息"为由拒绝执行
 - **action=recall_message**：撤回（删除）一条消息（需要 message_id；只能撤回 Bot 自身发送的消息）
   - message_id 来源：① 刚才 send_message 返回的结果；② 先 read_group_messages 查最近消息列表，每条都带 `[id:om_xxx]`
 - **action=list_groups**：获取 Bot 所在的所有群列表（返回群名 + chat_id）
