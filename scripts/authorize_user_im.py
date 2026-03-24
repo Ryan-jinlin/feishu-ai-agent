@@ -46,9 +46,10 @@ if not APP_ID or not APP_SECRET:
     sys.exit(1)
 
 REDIRECT_URI = "http://localhost:19999/callback"
-SCOPE        = "im:message:readonly im:message.group_msg:get_as_user im:chat:readonly"
+SCOPE        = "im:message:readonly im:message.group_msg:get_as_user im:chat:readonly search:message im:message.send_as_user offline_access"
 TOKEN_FILE   = os.path.join(_BASE_DIR, ".user_im_token.json")
 FEISHU_HOST  = "https://open.feishu.cn"
+FEISHU_AUTH_HOST = "https://accounts.feishu.cn"  # v2 OAuth 使用 accounts 子域名
 
 # ── OAuth 回调服务器 ──────────────────────────────────────────────────
 _code_holder: dict[str, str] = {}
@@ -84,28 +85,17 @@ def _start_callback_server() -> http.server.HTTPServer:
 
 
 # ── Token 交换 ────────────────────────────────────────────────────────
-def _get_app_access_token() -> str:
-    resp = requests.post(
-        f"{FEISHU_HOST}/open-apis/auth/v3/app_access_token/internal",
-        json={"app_id": APP_ID, "app_secret": APP_SECRET},
-        timeout=15,
-    )
-    data = resp.json()
-    token = data.get("app_access_token", "")
-    if not token:
-        raise RuntimeError(f"获取 app_access_token 失败: {data}")
-    return token
-
-
 def _exchange_code(code: str) -> dict:
-    app_token = _get_app_access_token()
+    """使用 v2 OAuth 端点换 token（form data，无需先获取 app_access_token）。"""
     resp = requests.post(
-        f"{FEISHU_HOST}/open-apis/authen/v1/access_token",
-        headers={
-            "Authorization": f"Bearer {app_token}",
-            "Content-Type": "application/json",
+        f"{FEISHU_HOST}/open-apis/authen/v2/oauth/token",
+        data={
+            "grant_type": "authorization_code",
+            "client_id": APP_ID,
+            "client_secret": APP_SECRET,
+            "code": code,
+            "redirect_uri": REDIRECT_URI,
         },
-        json={"grant_type": "authorization_code", "code": code},
         timeout=15,
     )
     return resp.json()
@@ -161,7 +151,8 @@ def main() -> None:
         print(f"Token 兑换失败: {result}")
         sys.exit(1)
 
-    token_data = result.get("data", {})
+    # v2 OAuth: data 字段直接在顶层（无 data 嵌套）
+    token_data = result if result.get("access_token") else result.get("data", {})
     _save_token(token_data)
 
     expires_in = token_data.get("expires_in", "?")

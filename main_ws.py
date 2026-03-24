@@ -95,6 +95,7 @@ daily_summary = DailySummaryJob(
     anthropic_api_key=anthropic_key,
     owner_open_id=owner_open_id,
 )
+executor._daily_summary = daily_summary  # 注入，支持 feishu_action group_summary 按需触发
 
 # Bot 自身 open_id（群聊中用于判断是否被 @）
 _BOT_OPEN_ID: str = feishu.get_bot_open_id()
@@ -586,14 +587,18 @@ if __name__ == "__main__":
     _ensure_single_instance()   # 终止旧进程，保证单实例运行
     logger.info("个人助理机器人启动（长连接模式）")
 
-    # RSVP 轮询定时任务（每 5 分钟）+ 每日摘要（每天 00:00:05）+ token 预热（每 90 分钟）
+    # RSVP 轮询 + 日报（每天） + 周报（每周一） + token 预热
     scheduler = BackgroundScheduler(timezone="Asia/Shanghai")
     scheduler.add_job(_check_rsvp_changes, "interval", minutes=5, id="rsvp_check")
+    # 日报：每天 00:00:05，仅 HOT 群（≤1天有消息）
     scheduler.add_job(daily_summary.run, "cron", hour=0, minute=0, second=5, id="daily_summary")
+    # 周报：每周一 00:01:00，HOT + ACTIVE 群（≤7天有消息）
+    scheduler.add_job(daily_summary.run_weekly, "cron", day_of_week="mon", hour=0, minute=1, id="weekly_summary")
     scheduler.add_job(_warmup_feishu_token, "interval", minutes=90, id="token_warmup")
     scheduler.start()
     logger.info("RSVP 轮询任务已启动（每 5 分钟）")
-    logger.info("每日摘要任务已启动（每天 00:00:05）")
+    logger.info("每日摘要任务已启动（每天 00:00:05，仅 HOT 群）")
+    logger.info("每周摘要任务已启动（每周一 00:01:00，HOT+ACTIVE 群）")
     logger.info("feishu-sync token 预热任务已启动（每 90 分钟）")
 
     # 启动时立即预热一次（后台执行，不阻塞 WS 启动）

@@ -336,6 +336,9 @@ TOOL_DEFINITIONS = [
             "  需要 title + content（Markdown 文本）；ref_url 可选（指定目标知识库父页面，不填则创建到默认位置）。\n"
             "• drawio_to_board — 将 drawio XML 转换为飞书画板（Board），可在飞书中可视化编辑。\n"
             "  需要 title + drawio_content（drawio XML 文本）；ref_url 可选（指定目标知识库父页面）。\n\n"
+            "• group_summary — 按需触发群聊摘要（biweekly/monthly/quarterly）。"
+            "日报/周报由系统自动触发，无需调用此工具。"
+            "摘要将发布到飞书 Wiki 并发送 DM 通知。\n\n"
             "典型工作流：search → read_page（了解内容）→ create_page / edit_page（写入）\n"
             "修改 PPTX 时序图工作流：read_page（获取 obj_token）→ inspect_pptx（查看形状坐标）→ edit_pptx（替换文字 + 移动形状）"
         ),
@@ -344,7 +347,7 @@ TOOL_DEFINITIONS = [
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["search", "read_page", "list_pages", "create_page", "edit_page", "move_page", "send_message", "recall_message", "list_groups", "create_group", "delete_group", "get_group_members", "read_group_messages", "apply_mentions", "inspect_pptx", "edit_pptx", "create_task", "create_doc", "drawio_to_board"],
+                    "enum": ["search", "read_page", "list_pages", "create_page", "edit_page", "move_page", "send_message", "recall_message", "list_groups", "create_group", "delete_group", "get_group_members", "read_group_messages", "apply_mentions", "inspect_pptx", "edit_pptx", "create_task", "create_doc", "drawio_to_board", "group_summary"],
                     "description": "操作类型",
                 },
                 "query": {
@@ -524,6 +527,21 @@ TOOL_DEFINITIONS = [
                 "drawio_content": {
                     "type": "string",
                     "description": "drawio XML 文本内容（action=drawio_to_board 时必填）",
+                },
+                "report_type": {
+                    "type": "string",
+                    "enum": ["biweekly", "monthly", "quarterly"],
+                    "description": (
+                        "摘要报告类型（action=group_summary 时必填）。"
+                        "biweekly=双周报（≤30天有消息的群）、"
+                        "monthly=月报（≤90天）、"
+                        "quarterly=三月报（≤180天）。"
+                        "daily/weekly 由系统自动触发，无需手动调用。"
+                    ),
+                },
+                "days_back": {
+                    "type": "integer",
+                    "description": "回看天数（action=group_summary 时可选，默认由 report_type 决定）",
                 },
             },
             "required": ["action"],
@@ -889,6 +907,64 @@ TOOL_DEFINITIONS = [
             "required": ["query"],
         },
     },
+    {
+        "name": "np_aeb_calc",
+        "description": (
+            "NP&AEB 制动模型精确计算器。当用户提问涉及制动/刹车，且涉及距离计算（感知检出距离、制动距离、停车距离等）时使用。\n"
+            "支持两种模式：\n"
+            "  distance  ：已知初始车速(v0)、AEB介入速度(v_aeb)、NP制动边界 → 计算所需感知检出距离及各阶段分解\n"
+            "  latest_aeb：已知感知检出距离(s_det)、初始车速(v0)、NP制动边界 → 反推最晚AEB介入速度\n"
+            "NP limits 格式：[{\"v\": null, \"a\": 6, \"j\": 8}]（全速段），或按速度段分段：[{\"v\": \"50\", \"a\": 5, \"j\": 7}, {\"v\": \"100\", \"a\": 4, \"j\": 6}]，或阈值：[{\"v\": \">80\", \"a\": 3, \"j\": 5}]。\n"
+            "默认参数：制动延迟 t_delay=0.5s，AEB减速度 aeb_a=9 m/s²，AEB jerk aeb_j=20 m/s³（无需用户提供时使用默认值）。\n"
+            "注意：v0 为实际车速（km/h），非表显车速。"
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "mode": {
+                    "type": "string",
+                    "enum": ["distance", "latest_aeb"],
+                    "description": "distance：正向计算所需检出距离；latest_aeb：反推最晚AEB介入速度",
+                },
+                "v0": {
+                    "type": "number",
+                    "description": "初始实际车速，单位 km/h",
+                },
+                "v_aeb": {
+                    "type": "number",
+                    "description": "AEB 介入速度，单位 km/h（distance 模式必填）",
+                },
+                "s_det": {
+                    "type": "number",
+                    "description": "感知检出距离，单位 m（latest_aeb 模式必填）",
+                },
+                "t_delay": {
+                    "type": "number",
+                    "description": "制动延迟，单位 s，默认 0.5",
+                    "default": 0.5,
+                },
+                "aeb_a": {
+                    "type": "number",
+                    "description": "AEB 减速度幅值，单位 m/s²，默认 9",
+                    "default": 9.0,
+                },
+                "aeb_j": {
+                    "type": "number",
+                    "description": "AEB jerk 幅值，单位 m/s³，默认 20",
+                    "default": 20.0,
+                },
+                "limits": {
+                    "type": "array",
+                    "description": (
+                        "NP 制动边界，JSON 数组。每项含 v（速度节点 km/h 或 null 表示全速段），a（最大减速度 m/s²），j（最大 jerk m/s³）。"
+                        "例：[{\"v\": null, \"a\": 6, \"j\": 8}] 或 [{\"v\": \"50\", \"a\": 5, \"j\": 7}, {\"v\": \"100\", \"a\": 4, \"j\": 6}]"
+                    ),
+                    "items": {"type": "object"},
+                },
+            },
+            "required": ["mode", "v0", "limits"],
+        },
+    },
 ]
 
 
@@ -897,10 +973,12 @@ TOOL_DEFINITIONS = [
 # ------------------------------------------------------------------ #
 
 class ToolExecutor:
-    def __init__(self, feishu: FeishuClient, message_cache=None, owner_open_id: str = ""):
+    def __init__(self, feishu: FeishuClient, message_cache=None, owner_open_id: str = "",
+                 daily_summary_job=None):
         self.feishu = feishu
         self._message_cache = message_cache  # feishu.message_cache.MessageCache 实例（可为 None）
         self.owner_open_id = owner_open_id   # bot owner open_id，建群时自动加入
+        self._daily_summary = daily_summary_job  # DailySummaryJob 实例，用于按需触发摘要
         # 同一会话内缓存 URL 解析结果，避免 resolve_url + download_topic 重复请求
         self._url_resolve_cache: dict[str, dict] = {}
         # 非 owner P2P 对话映射：sender_open_id → chat_id（由 main_ws 在收到消息时写入）
@@ -931,6 +1009,8 @@ class ToolExecutor:
             return self._debate(**tool_input)
         if tool_name == "find_skills":
             return self._find_skills(**tool_input)
+        if tool_name == "np_aeb_calc":
+            return self._np_aeb_calc(**tool_input)
         return f"未知工具: {tool_name}"
 
     # ── 会邀 ──────────────────────────────────────────────────────
@@ -1292,6 +1372,8 @@ class ToolExecutor:
         task_assignee_open_ids: list | None = None,
         task_follower_open_ids: list | None = None,
         drawio_content: str = "",
+        report_type: str = "",
+        days_back: int | None = None,
     ) -> str:
         """统一分发飞书知识库操作"""
         if action == "search":
@@ -1668,7 +1750,21 @@ class ToolExecutor:
                 return f"飞书画板已创建！\n{output[:1000]}"
             except Exception as e:
                 return f"drawio 转飞书画板失败：{e}"
-        return f"未知 feishu_action: {action}。支持: search, read_page, list_pages, create_page, edit_page, move_page, send_message, recall_message, list_groups, create_group, get_group_members, read_group_messages, apply_mentions, inspect_pptx, edit_pptx, create_task, create_doc, drawio_to_board"
+        if action == "group_summary":
+            if not self._daily_summary:
+                return "group_summary 不可用：DailySummaryJob 未注入（请联系管理员）"
+            allowed = ("biweekly", "monthly", "quarterly")
+            if report_type not in allowed:
+                return f"group_summary 需要 report_type，可选值：{allowed}。daily/weekly 由系统自动触发。"
+            try:
+                results = self._daily_summary.run_for_report_type(report_type, days_back)
+                if results:
+                    return f"{report_type} 摘要已完成，共处理 {len(results)} 个群，摘要已发布到飞书 Wiki 并发送 DM 通知。"
+                return f"{report_type} 摘要完成：在指定时间段内未找到符合条件的群消息（tier 范围内无活跃群）。"
+            except Exception as e:
+                return f"group_summary 执行失败：{e}"
+
+        return f"未知 feishu_action: {action}。支持: search, read_page, list_pages, create_page, edit_page, move_page, send_message, recall_message, list_groups, create_group, get_group_members, read_group_messages, apply_mentions, inspect_pptx, edit_pptx, create_task, create_doc, drawio_to_board, group_summary"
 
     def _run_feishu_cli(self, *args: str, timeout: int = 30) -> str:
         """调用 feishu-sync-cli，返回 stdout 字符串；失败时自动重试最多 2 次"""
@@ -2933,6 +3029,51 @@ class ToolExecutor:
         if "internal" in tasks:
             sections.append(tasks["internal"])
         return "\n\n---\n\n".join(sections)
+
+    # ── NP&AEB 制动计算 ────────────────────────────────────────────
+
+    def _np_aeb_calc(
+        self,
+        mode: str,
+        v0: float,
+        limits: list,
+        v_aeb: float | None = None,
+        s_det: float | None = None,
+        t_delay: float = 0.5,
+        aeb_a: float = 9.0,
+        aeb_j: float = 20.0,
+    ) -> str:
+        """调用 calc_braking.py 进行 NP&AEB 制动模型精确计算"""
+        _SCRIPT = os.path.join(
+            os.path.expanduser("~"), "项目管理", "AI Agent",
+            ".agents", "skills", "np-aeb-braking-calc", "scripts", "calc_braking.py"
+        )
+        if not os.path.exists(_SCRIPT):
+            return "错误：calc_braking.py 未找到，请确认 np&aeb-braking-calc skill 已安装。"
+        cmd = [
+            sys.executable, _SCRIPT,
+            "--mode", mode,
+            "--v0", str(v0),
+            "--t_delay", str(t_delay),
+            "--aeb_a", str(aeb_a),
+            "--aeb_j", str(aeb_j),
+            "--limits", json.dumps(limits, ensure_ascii=False),
+        ]
+        if mode == "distance":
+            if v_aeb is None:
+                return "错误：distance 模式需要提供 v_aeb 参数。"
+            cmd += ["--v_aeb", str(v_aeb)]
+        else:
+            if s_det is None:
+                return "错误：latest_aeb 模式需要提供 s_det 参数。"
+            cmd += ["--s_det", str(s_det)]
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            if result.returncode != 0:
+                return f"计算失败：{result.stderr.strip() or result.stdout.strip()}"
+            return result.stdout.strip()
+        except Exception as e:
+            return f"计算异常：{e}"
 
 
 # ------------------------------------------------------------------ #

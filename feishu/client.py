@@ -617,25 +617,44 @@ class FeishuClient:
                 raise
             logger.warning("send_text_to_chat Bot token HTTP %s，尝试用户 IM token",
                            e.response.status_code)
-        # Fallback：用用户 IM token（Bot 不在群、但用户在群内）
+        # Fallback 1：用户 IM token（.user_im_token.json）
         user_headers = self._user_im_headers()
-        if not user_headers:
-            logger.error("send_text_to_chat：Bot token 失败且无用户 IM token，无法发送")
-            return ""
-        resp2 = requests.post(
-            f"{FEISHU_HOST}/open-apis/im/v1/messages",
-            headers={**user_headers, "Content-Type": "application/json"},
-            params=params,
-            json=payload,
-            timeout=10,
-        )
-        resp2.raise_for_status()
-        data2 = resp2.json()
-        if data2.get("code") != 0:
-            logger.error("send_text_to_chat 用户 IM token 也失败: %s", data2)
-            return ""
-        logger.info("send_text_to_chat：已用用户 IM token 以用户身份发送到群 %s", chat_id)
-        return data2.get("data", {}).get("message_id", "") or ""
+        if user_headers:
+            try:
+                resp2 = requests.post(
+                    f"{FEISHU_HOST}/open-apis/im/v1/messages",
+                    headers={**user_headers, "Content-Type": "application/json"},
+                    params=params,
+                    json=payload,
+                    timeout=10,
+                )
+                resp2.raise_for_status()
+                data2 = resp2.json()
+                if data2.get("code") == 0:
+                    logger.info("send_text_to_chat：已用用户 IM token 以用户身份发送到群 %s", chat_id)
+                    return data2.get("data", {}).get("message_id", "") or ""
+                logger.warning("send_text_to_chat 用户 IM token 失败 code=%s，尝试 feishu-sync token",
+                               data2.get("code"))
+            except Exception as e:
+                logger.warning("send_text_to_chat 用户 IM token 异常: %s，尝试 feishu-sync token", e)
+        # Fallback 2：feishu-sync user token（~/.feishu/access_token.json）
+        try:
+            from feishu_sync.api import send_message as _feishu_sync_send
+            result = _feishu_sync_send(
+                receive_id=chat_id,
+                msg_type="text",
+                content=json.dumps({"text": text}),
+                receive_id_type="chat_id",
+                as_user=True,
+            )
+            mid = result.get("message_id", "") or ""
+            if mid:
+                logger.info("send_text_to_chat：已用 feishu-sync user token 以用户身份发送到群 %s", chat_id)
+                return mid
+        except Exception as e:
+            logger.error("send_text_to_chat feishu-sync token 也失败: %s", e)
+        logger.error("send_text_to_chat：所有 token 均失败，无法发送到群 %s", chat_id)
+        return ""
 
     def recall_message(self, message_id: str) -> bool:
         """撤回（删除）指定消息 DELETE /open-apis/im/v1/messages/{message_id}"""
@@ -1064,25 +1083,25 @@ class FeishuClient:
             if not refresh_token:
                 logger.warning("user_im_token 已过期且无 refresh_token，请重新运行授权脚本")
                 return None
-            _app_tok_resp = requests.post(
-                f"{FEISHU_HOST}/open-apis/auth/v3/app_access_token/internal",
-                json={"app_id": self.app_id, "app_secret": self.app_secret},
-                timeout=15,
-            )
-            _app_tok = _app_tok_resp.json().get("app_access_token", "")
+            # v2 OAuth refresh（form data，无需 app_access_token）
             resp = requests.post(
-                f"{FEISHU_HOST}/open-apis/authen/v1/oidc/refresh_access_token",
-                headers={"Authorization": f"Bearer {_app_tok}", "Content-Type": "application/json"},
-                json={"grant_type": "refresh_token", "refresh_token": refresh_token},
+                f"{FEISHU_HOST}/open-apis/authen/v2/oauth/token",
+                data={
+                    "grant_type": "refresh_token",
+                    "client_id": self.app_id,
+                    "client_secret": self.app_secret,
+                    "refresh_token": refresh_token,
+                },
                 timeout=15,
             )
             result = resp.json()
             if result.get("code") == 0:
-                new_data = result.get("data", {})
+                # v2 response: data 在顶层（无 data 嵌套）
+                new_data = result if result.get("access_token") else result.get("data", {})
                 new_data["saved_at"] = int(time.time())
                 with open(_USER_IM_TOKEN_FILE, "w", encoding="utf-8") as f:
                     json.dump(new_data, f, ensure_ascii=False, indent=2)
-                logger.info("user_im_token 已自动刷新")
+                logger.info("user_im_token 已自动刷新（v2）")
                 return new_data.get("access_token")
             else:
                 logger.warning("user_im_token 刷新失败: %s，请重新运行授权脚本", result)
@@ -1132,85 +1151,173 @@ class FeishuClient:
         return groups
 
     def get_group_messages_as_user(
-        self, chat_id: str, start_ts: int, end_ts: int, max_msgs: int = 200
+        self, chat_id: str, start_ts: int, end_ts: int, max_msgs: int = 500
     ) -> list[dict]:
-        """用用户身份读取群消息（适用于 Bot 不在该群的场景）。"""
+        """用用户身份读取群消息（适用于 Bot 不在该群的场景）。
+
+        使用 search/v2/message API 获取消息 ID，再逐条拉取内容。
+        需要用户授权 search:message + im:message:readonly 权限。
+        """
         headers = self._user_im_headers()
         if not headers:
             logger.warning("get_group_messages_as_user: 无用户 IM token，请运行授权脚本")
             return []
+
+        # Step 1: 通过搜索 API 获取消息 ID 列表
+        message_ids = self._search_message_ids(headers, chat_id, start_ts, end_ts, max_msgs)
+        if message_ids is None:
+            # search:message 权限不足，直接抛出让调用方感知
+            raise RuntimeError(
+                "用户 IM token 缺少 search:message 权限，请重新运行授权脚本"
+                "（已在 SCOPE 中添加 search:message，重新授权即可）"
+            )
+
+        if not message_ids:
+            logger.info("get_group_messages_as_user [%s] 搜索无结果", chat_id)
+            return []
+
+        logger.info(
+            "get_group_messages_as_user [%s] 搜索到 %d 条消息 ID，开始拉取内容",
+            chat_id, len(message_ids),
+        )
+
+        # Step 2: 按 message_id 逐条拉取消息内容
         messages: list[dict] = []
-        page_token = ""
-        while len(messages) < max_msgs:
-            params: dict = {
-                "container_id_type": "chat",
-                "container_id": chat_id,
-                "start_time": str(start_ts),
-                "end_time": str(end_ts),
-                "sort_type": "ByCreateTimeAsc",
-                "page_size": 50,
-            }
-            if page_token:
-                params["page_token"] = page_token
+        for msg_id in message_ids:
             try:
-                resp = requests.get(
-                    f"{FEISHU_HOST}/open-apis/im/v1/messages",
+                item = self._fetch_message_by_id(headers, msg_id)
+                if item:
+                    messages.append(item)
+            except Exception as e:
+                logger.warning("拉取消息 %s 失败: %s", msg_id, e)
+
+        messages.sort(key=lambda m: m.get("ts", 0))
+        logger.info("get_group_messages_as_user [%s] 共获取 %d 条消息", chat_id, len(messages))
+        return messages
+
+    def _search_message_ids(
+        self, headers: dict, chat_id: str, start_ts: int, end_ts: int, max_count: int
+    ) -> list[str] | None:
+        """通过 search/v2/message 获取指定群、指定时间段的消息 ID 列表。
+
+        返回 None 表示权限不足（缺少 search:message scope）。
+        返回空列表表示无结果。
+        """
+        all_ids: list[str] = []
+        # 先用空 query 尝试（获取全量）；若 API 要求非空则用宽泛关键词
+        for query in ["", " ", "的", "是", "在", "了", "a"]:
+            ids: list[str] = []
+            page_token = ""
+            failed = False
+
+            while len(ids) < max_count:
+                body: dict = {
+                    "query": query,
+                    "chat_ids": [chat_id],
+                    "start_time": start_ts,
+                    "end_time": end_ts,
+                }
+                if page_token:
+                    body["page_token"] = page_token
+
+                resp = requests.post(
+                    f"{FEISHU_HOST}/open-apis/search/v2/message",
                     headers=headers,
-                    params=params,
+                    params={"page_size": 50, "user_id_type": "open_id"},
+                    json=body,
                     timeout=15,
                 )
                 data = resp.json()
-                if data.get("code") != 0:
-                    err = f"code={data.get('code')} msg={data.get('msg', '')}"
+                code = data.get("code", -1)
+
+                if code == 99991679:
+                    # 权限不足：缺少 search:message scope
                     logger.warning(
-                        "get_group_messages_as_user [%s] API错误 %s",
-                        chat_id, err,
+                        "search/v2/message 权限不足（缺少 search:message scope）: %s",
+                        data.get("msg", ""),
                     )
-                    raise RuntimeError(f"用户 IM token 读取群消息失败：{err}")
-                items = data.get("data", {}).get("items", [])
-                kept = 0
-                skipped_types: dict[str, int] = {}
-                for item in items:
-                    try:
-                        msg_type = item.get("msg_type", "")
-                        if msg_type not in ("text", "post"):
-                            skipped_types[msg_type] = skipped_types.get(msg_type, 0) + 1
-                            continue
-                        body = item.get("body", {})
-                        content_str = body.get("content", "{}")
-                        try:
-                            content = json.loads(content_str)
-                        except Exception:
-                            content = {}
-                        if msg_type == "text":
-                            text = content.get("text", "").strip()
-                        else:
-                            text = self._extract_post_text(content)
-                        if not text:
-                            continue
-                        sender_id = item.get("sender", {}).get("id", "")
-                        sender_name = self._resolve_sender_name(sender_id)
-                        messages.append({
-                            "message_id": item.get("message_id", ""),
-                            "sender_name": sender_name,
-                            "text": text,
-                            "ts": int(item.get("create_time", "0")),
-                        })
-                        kept += 1
-                    except Exception as item_err:
-                        logger.warning("跳过单条消息解析失败: %s", item_err)
-                        continue
-                logger.info(
-                    "get_group_messages_as_user [%s] 本页 %d 条, 保留 %d 条, 跳过类型: %s",
-                    chat_id, len(items), kept, skipped_types or "无",
-                )
+                    return None
+
+                if code != 0:
+                    logger.debug(
+                        "search/v2/message query=%r 错误 code=%s msg=%s",
+                        query, code, data.get("msg", ""),
+                    )
+                    failed = True
+                    break
+
+                items = data.get("data", {}).get("items") or []
+                ids.extend(items)
+
                 if not data.get("data", {}).get("has_more"):
                     break
                 page_token = data["data"].get("page_token", "")
-            except Exception as e:
-                logger.error("get_group_messages_as_user 异常: %s", e)
+
+            if not failed and ids:
+                all_ids.extend(ids)
+                break  # 成功获取到结果，无需继续尝试其他 query
+
+            if not failed:
+                # 请求成功但结果为空（时间段内无匹配消息），直接返回
                 break
-        return messages
+
+        # 去重（不同 query 可能返回重叠结果）
+        seen: set[str] = set()
+        unique_ids: list[str] = []
+        for mid in all_ids:
+            if mid not in seen:
+                seen.add(mid)
+                unique_ids.append(mid)
+        return unique_ids[:max_count]
+
+    def _fetch_message_by_id(self, headers: dict, message_id: str) -> dict | None:
+        """按 message_id 拉取消息内容，返回标准消息 dict 或 None。"""
+        resp = requests.get(
+            f"{FEISHU_HOST}/open-apis/im/v1/messages/{message_id}",
+            headers=headers,
+            params={"user_id_type": "open_id"},
+            timeout=15,
+        )
+        data = resp.json()
+        if data.get("code") != 0:
+            logger.warning("_fetch_message_by_id %s 失败: code=%s", message_id, data.get("code"))
+            return None
+
+        items = data.get("data", {}).get("items") or []
+        if not items:
+            return None
+
+        item = items[0]
+        msg_type = item.get("msg_type", "")
+        if msg_type not in ("text", "post"):
+            return None
+
+        body = item.get("body", {})
+        content_str = body.get("content", "{}")
+        try:
+            content = json.loads(content_str)
+        except Exception:
+            content = {}
+
+        if msg_type == "text":
+            text = content.get("text", "").strip()
+        else:
+            text = self._extract_post_text(content)
+
+        if not text:
+            return None
+
+        sender_id = item.get("sender", {}).get("id", "")
+        sender_name = self._resolve_sender_name(sender_id)
+        raw_ts = int(item.get("create_time", "0"))
+        # Feishu create_time 为毫秒，统一转换为秒
+        ts = raw_ts // 1000 if raw_ts > 1_000_000_000_000 else raw_ts
+        return {
+            "message_id": message_id,
+            "sender_name": sender_name,
+            "text": text,
+            "ts": ts,
+        }
 
     def move_wiki_page(
         self, space_id: str, node_token: str, target_parent_token: str
@@ -1549,8 +1656,10 @@ class FeishuClient:
 
     def get_group_messages(
         self, chat_id: str, start_ts: int, end_ts: int, max_msgs: int = 200
-    ) -> list[dict]:
-        """获取群聊指定时间段内的消息。返回 [{sender_name, text, ts}]"""
+    ) -> list[dict] | None:
+        """获取群聊指定时间段内的消息。返回 [{sender_name, text, ts}]。
+        Bot 不在群时返回 None（区别于 [] 表示该时段无消息）。
+        """
         messages: list[dict] = []
         page_token = ""
         while len(messages) < max_msgs:
@@ -1577,10 +1686,8 @@ class FeishuClient:
                     msg  = data.get("msg", "")
                     logger.warning("get_group_messages [%s] 失败: code=%s %s", chat_id, code, msg)
                     if code == 230002:
-                        raise RuntimeError(
-                            f"Bot 不在群 {chat_id} 内，无法读取消息。"
-                            "请先将 Bot 加入该群，或将需要总结的聊天记录【合并转发】给我。"
-                        )
+                        # Bot 不在群，返回 None 让调用方感知（区别于 [] 空消息）
+                        return None
                     raise RuntimeError(f"读取群消息失败（code={code} msg={msg}）")
                 for item in data.get("data", {}).get("items", []):
                     try:
