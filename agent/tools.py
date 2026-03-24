@@ -32,7 +32,10 @@ PPT_OUTPUT_DIR = os.environ.get("MOMENTA_PPT_DIR") or os.path.join(
 # PPT 模版路径（使用项目目录中的 Momenta 模版）
 # tools.py 位于 personal-assistant/agent/，模版在上两级目录 AI Agent/
 _AGENT_BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-PPT_TEMPLATE_PATH = os.path.join(_AGENT_BASE_DIR, "PPT模版.pptx")
+PPT_TEMPLATE_PATH = os.environ.get(
+    "PPT_TEMPLATE_PATH",
+    os.path.join(_AGENT_BASE_DIR, "PPT模版.pptx"),
+)
 
 # Mviz Skill 目录
 _SKILL_BASE_DIR = os.path.join(
