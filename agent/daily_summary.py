@@ -346,13 +346,16 @@ class DailySummaryJob:
         chat_text = "\n".join(lines)
 
         prompt = (
-            f"请对以下飞书群「{group_name}」{date_str} 的聊天记录进行整理和摘要。\n\n"
-            "要求：\n"
-            "1. 提炼出关键讨论议题和决策\n"
-            "2. 列出重要的行动项和跟进事项（如有）\n"
-            "3. 保留重要的数据、日期、链接\n"
-            "4. 输出格式为 Markdown，使用清晰的章节结构\n"
-            "5. 语言简洁，重点突出\n\n"
+            f"以下是飞书群「{group_name}」{date_str} 的聊天记录。\n\n"
+            "请像一位熟悉团队情况的同事，用自然的语气写一份简洁的群聊摘要，"
+            "帮我快速了解今天群里发生了什么。\n\n"
+            "格式要求（与飞书富文本渲染保持一致）：\n"
+            f"- 第一行：`# {group_name} {date_str} 摘要`\n"
+            "- 用 `## 主要内容` `## 待跟进` 等章节划分，没有内容的章节不写\n"
+            "- 多个议题用数字序号 `1.` `2.` `3.` 列出，而非全部用 `-`\n"
+            "- 涉及数字、日期、人名、链接原样保留\n"
+            "- 语言直接，不要写「本群今日讨论了……」之类的套话，直接说事\n"
+            "- 如果消息很少或内容琐碎，一两句话概括即可，不必强行分章节\n\n"
             f"聊天记录：\n{chat_text}"
         )
 
@@ -434,20 +437,17 @@ class DailySummaryJob:
             logger.warning("未配置 owner_open_id，无法发送摘要 DM")
             return
 
-        lines = [f"**{report_label} {date_str}**\n"]
-        for r in results:
+        lines = [f"# {report_label} {date_str}"]
+        for i, r in enumerate(results, 1):
             name     = r["group_name"]
             count    = r["msg_count"]
             page_url = r.get("page_url", "")
             status   = r["result_str"]
-            space    = r.get("space_name", "")
 
             if page_url:
-                lines.append(f"📌 **{name}**（{count} 条）→ [查看摘要]({page_url})")
-                if space:
-                    lines.append(f"   存入：{space}")
+                lines.append(f"{i}. **{name}**（{count} 条）→ [摘要]({page_url})")
             else:
-                lines.append(f"📌 **{name}**（{count} 条）— {status}")
+                lines.append(f"{i}. **{name}**（{count} 条）— {status}")
 
         text = "\n".join(lines)
         try:
