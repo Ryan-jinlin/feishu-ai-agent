@@ -166,12 +166,12 @@ def _fmp_get(path: str, params: dict | None = None, retry: bool = True) -> dict 
         return None
 
 
-def query_idle_vehicles(project: str = "庙香山", start_hours: int = 0, end_hours: int = 8) -> dict:
+def query_idle_vehicles(project: str = "Project-MXS", start_hours: int = 0, end_hours: int = 8) -> dict:
     """
     查询指定项目的车辆预约情况，找出当前时间段内空闲的车辆。
 
     Args:
-        project: 项目名称，如"庙香山"
+        project: 项目名称，如"Project-MXS"
         start_hours: 查询开始偏移（相对当前，小时），0 = 现在
         end_hours: 查询结束偏移，8 = 8小时后
 

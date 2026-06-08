@@ -595,7 +595,7 @@ if __name__ == "__main__":
     # 周报：每周一 00:01:00，HOT + ACTIVE 群（≤7天有消息）
     scheduler.add_job(daily_summary.run_weekly, "cron", day_of_week="mon", hour=0, minute=1, id="weekly_summary")
     scheduler.add_job(_warmup_feishu_token, "interval", minutes=90, id="token_warmup")
-    # 庙香山周例会内容预加载：每4小时刷新一次
+    # Project-MXS周例会内容预加载：每4小时刷新一次
     scheduler.add_job(preload_cpm_weekly_meeting, "interval", hours=4, id="cpm_preload")
     scheduler.start()
     logger.info("RSVP 轮询任务已启动（每 5 分钟）")
@@ -606,7 +606,7 @@ if __name__ == "__main__":
 
     # 启动时立即预热一次（后台执行，不阻塞 WS 启动）
     threading.Thread(target=_warmup_feishu_token, daemon=True, name="token-warmup-init").start()
-    # 启动时立即预加载一次庙香山周例会
+    # 启动时立即预加载一次Project-MXS周例会
     threading.Thread(target=preload_cpm_weekly_meeting, daemon=True, name="cpm-preload-init").start()
 
     event_handler = (

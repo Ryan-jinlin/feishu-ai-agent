@@ -1,0 +1,75 @@
+{
+  "cookies": [
+    {
+      "name": "KEYCLOAK_3P_COOKIE_SAMESITE",
+      "value": "supported",
+      "domain": "keycloak-prod-cla.mmtwork.com",
+      "path": "/auth/realms/momenta-prod/protocol/openid-connect/3p-cookies",
+      "expires": 1775120133.59128,
+      "httpOnly": false,
+      "secure": true,
+      "sameSite": "None"
+    },
+    {
+      "name": "AUTH_SESSION_ID",
+      "value": "56d95b12-951e-4347-81e2-b8ae3caf8813.keycloak26-0-19442",
+      "domain": "keycloak-prod-cla.mmtwork.com",
+      "path": "/auth/realms/momenta-prod/",
+      "expires": -1,
+      "httpOnly": true,
+      "secure": true,
+      "sameSite": "None"
+    },
+    {
+      "name": "KEYCLOAK_IDENTITY",
+      "value": "eyJhbGciOiJIUzUxMiIsInR5cCIgOiAiSldUIiwia2lkIiA6ICI2MThmODg3NC1kYzZjLTQ4YzEtOGY3NC03M2I4NzY5OWIwMDUifQ.eyJleHAiOjE3NzU3MjQ4NzMsImlhdCI6MTc3NTEyMDA3MywianRpIjoiMWRhMTZkMzItMzg4Mi00OTU2LWJmYjUtYmMyMDBlNmQ0MTRiIiwiaXNzIjoiaHR0cHM6Ly9rZXljbG9hay1wcm9kLWNsYS5tbXR3b3JrLmNvbS9hdXRoL3JlYWxtcy9tb21lbnRhLXByb2QiLCJzdWIiOiJkMTBiOWU2Ny1jZTM0LTQ1ZGItYTQ3OS01OThlNTIyODY0ZGQiLCJ0eXAiOiJTZXJpYWxpemVkLUlEIiwic2lkIjoiNTZkOTViMTItOTUxZS00MzQ3LTgxZTItYjhhZTNjYWY4ODEzIiwic3RhdGVfY2hlY2tlciI6IldBQ1djbll5cUdTajZlZlI4QUZkOXA1eFJYNGF1X0kzaE1Za1lrUGdPdXcifQ.liwj9JwPltJtVvPNO5_012Rql0pllb3GjGXWqLENGjhvVL1ZHfjY-gBe36SK3pvIMr1pRBjfbG2gDZuGEMaw4g",
+      "domain": "keycloak-prod-cla.mmtwork.com",
+      "path": "/auth/realms/momenta-prod/",
+      "expires": -1,
+      "httpOnly": true,
+      "secure": true,
+      "sameSite": "None"
+    },
+    {
+      "name": "KEYCLOAK_SESSION",
+      "value": "\"momenta-prod/d10b9e67-ce34-45db-a479-598e522864dd/56d95b12-951e-4347-81e2-b8ae3caf8813\"",
+      "domain": "keycloak-prod-cla.mmtwork.com",
+      "path": "/auth/realms/momenta-prod/",
+      "expires": 1775724873.362655,
+      "httpOnly": false,
+      "secure": true,
+      "sameSite": "None"
+    },
+    {
+      "name": "id_token",
+      "value": "header.eyJleHAiOjE3NzU3MjQ4NzMsImlhdCI6MTc3NTEyMDA3MywiYXV0aF90aW1lIjoxNzc1MTIwMDczLCJqdGkiOiJjN2MxNjkyMC05M2JhLTRjYTctYTQwMi0wZGRmNjRjYjMwZDgiLCJpc3MiOiJodHRwczovL2tleWNsb2FrLXByb2QtY2xhLm1tdHdvcmsuY29tL2F1dGgvcmVhbG1zL21vbWVudGEtcHJvZCIsImF1ZCI6WyJkZmRpLWNvbnNvbGUiLCJzaW11bGF0aW9uIiwibXZpeiIsImFjY291bnQiXSwic3ViIjoiZDEwYjllNjctY2UzNC00NWRiLWE0NzktNTk4ZTUyMjg2NGRkIiwidHlwIjoiQmVhcmVyIiwiYXpwIjoiZm1wIiwibm9uY2UiOiIwNzkzN2Y1OS1kNjZjLTQwMWEtYTUxNC03ZTE1MGMzYmE0OTgiLCJzaWQiOiI1NmQ5NWIxMi05NTFlLTQzNDctODFlMi1iOGFlM2NhZjg4MTMiLCJhbGxvd2VkLW9yaWdpbnMiOlsiaHR0cHM6Ly9mbXAubW9tZW50YS53b3JrcyIsImh0dHA6Ly9sb2NhbGhvc3Q6ODAwMCIsImh0dHBzOi8vZmxlZXRvcHMubW9tZW50YS53b3JrcyJdLCJyZWFsbV9hY2Nlc3MiOnsicm9sZXMiOlsiZGVmYXVsdC1yb2xlcy1tb21lbnRhLXByb2QiLCJvZmZsaW5lX2FjY2VzcyIsInVtYV9hdXRob3JpemF0aW9uIl19LCJyZXNvdXJjZV9hY2Nlc3MiOnsiZGZkaS1jb25zb2xlIjp7InJvbGVzIjpbInVzZXIiXX0sInNpbXVsYXRpb24iOnsicm9sZXMiOlsidXNlciJdfSwibXZpeiI6eyJyb2xlcyI6WyJtdml6LXBsYXllciJdfSwiYWNjb3VudCI6eyJyb2xlcyI6WyJtYW5hZ2UtYWNjb3VudCIsIm1hbmFnZS1hY2NvdW50LWxpbmtzIiwidmlldy1wcm9maWxlIl19fSwic2NvcGUiOiJvcGVuaWQgcHJvZmlsZSBlbWFpbCIsImVtYWlsX3ZlcmlmaWVkIjpmYWxzZSwibmFtZSI6IlJ5YW4gTGkiLCJwcmVmZXJyZWRfdXNlcm5hbWUiOiJyeWFuLmxpIiwic2Vzc2lvbl9zdGF0ZSI6IjU2ZDk1YjEyLTk1MWUtNDM0Ny04MWUyLWI4YWUzY2FmODgxMyIsImdpdmVuX25hbWUiOiJSeWFuIiwiZmFtaWx5X25hbWUiOiJMaSIsImVtYWlsIjoicnlhbi5saUBtb21lbnRhLmFpIn0.signature",
+      "domain": "fmp.momenta.works",
+      "path": "/",
+      "expires": -1,
+      "httpOnly": false,
+      "secure": false,
+      "sameSite": "Lax"
+    }
+  ],
+  "origins": [
+    {
+      "origin": "https://fmp.momenta.works",
+      "localStorage": [
+        {
+          "name": "username",
+          "value": "ryan.li"
+        },
+        {
+          "name": "antd-pro-authority",
+          "value": "[]"
+        },
+        {
+          "name": "id_token",
+          "value": "header.eyJleHAiOjE3NzU3MjQ4NzMsImlhdCI6MTc3NTEyMDA3MywiYXV0aF90aW1lIjoxNzc1MTIwMDczLCJqdGkiOiJjN2MxNjkyMC05M2JhLTRjYTctYTQwMi0wZGRmNjRjYjMwZDgiLCJpc3MiOiJodHRwczovL2tleWNsb2FrLXByb2QtY2xhLm1tdHdvcmsuY29tL2F1dGgvcmVhbG1zL21vbWVudGEtcHJvZCIsImF1ZCI6WyJkZmRpLWNvbnNvbGUiLCJzaW11bGF0aW9uIiwibXZpeiIsImFjY291bnQiXSwic3ViIjoiZDEwYjllNjctY2UzNC00NWRiLWE0NzktNTk4ZTUyMjg2NGRkIiwidHlwIjoiQmVhcmVyIiwiYXpwIjoiZm1wIiwibm9uY2UiOiIwNzkzN2Y1OS1kNjZjLTQwMWEtYTUxNC03ZTE1MGMzYmE0OTgiLCJzaWQiOiI1NmQ5NWIxMi05NTFlLTQzNDctODFlMi1iOGFlM2NhZjg4MTMiLCJhbGxvd2VkLW9yaWdpbnMiOlsiaHR0cHM6Ly9mbXAubW9tZW50YS53b3JrcyIsImh0dHA6Ly9sb2NhbGhvc3Q6ODAwMCIsImh0dHBzOi8vZmxlZXRvcHMubW9tZW50YS53b3JrcyJdLCJyZWFsbV9hY2Nlc3MiOnsicm9sZXMiOlsiZGVmYXVsdC1yb2xlcy1tb21lbnRhLXByb2QiLCJvZmZsaW5lX2FjY2VzcyIsInVtYV9hdXRob3JpemF0aW9uIl19LCJyZXNvdXJjZV9hY2Nlc3MiOnsiZGZkaS1jb25zb2xlIjp7InJvbGVzIjpbInVzZXIiXX0sInNpbXVsYXRpb24iOnsicm9sZXMiOlsidXNlciJdfSwibXZpeiI6eyJyb2xlcyI6WyJtdml6LXBsYXllciJdfSwiYWNjb3VudCI6eyJyb2xlcyI6WyJtYW5hZ2UtYWNjb3VudCIsIm1hbmFnZS1hY2NvdW50LWxpbmtzIiwidmlldy1wcm9maWxlIl19fSwic2NvcGUiOiJvcGVuaWQgcHJvZmlsZSBlbWFpbCIsImVtYWlsX3ZlcmlmaWVkIjpmYWxzZSwibmFtZSI6IlJ5YW4gTGkiLCJwcmVmZXJyZWRfdXNlcm5hbWUiOiJyeWFuLmxpIiwic2Vzc2lvbl9zdGF0ZSI6IjU2ZDk1YjEyLTk1MWUtNDM0Ny04MWUyLWI4YWUzY2FmODgxMyIsImdpdmVuX25hbWUiOiJSeWFuIiwiZmFtaWx5X25hbWUiOiJMaSIsImVtYWlsIjoicnlhbi5saUBtb21lbnRhLmFpIn0.signature"
+        }
+      ]
+    }
+  ],
+  "fmp_id_token": "header.eyJleHAiOjE3NzU3MjQ4NzMsImlhdCI6MTc3NTEyMDA3MywiYXV0aF90aW1lIjoxNzc1MTIwMDczLCJqdGkiOiJjN2MxNjkyMC05M2JhLTRjYTctYTQwMi0wZGRmNjRjYjMwZDgiLCJpc3MiOiJodHRwczovL2tleWNsb2FrLXByb2QtY2xhLm1tdHdvcmsuY29tL2F1dGgvcmVhbG1zL21vbWVudGEtcHJvZCIsImF1ZCI6WyJkZmRpLWNvbnNvbGUiLCJzaW11bGF0aW9uIiwibXZpeiIsImFjY291bnQiXSwic3ViIjoiZDEwYjllNjctY2UzNC00NWRiLWE0NzktNTk4ZTUyMjg2NGRkIiwidHlwIjoiQmVhcmVyIiwiYXpwIjoiZm1wIiwibm9uY2UiOiIwNzkzN2Y1OS1kNjZjLTQwMWEtYTUxNC03ZTE1MGMzYmE0OTgiLCJzaWQiOiI1NmQ5NWIxMi05NTFlLTQzNDctODFlMi1iOGFlM2NhZjg4MTMiLCJhbGxvd2VkLW9yaWdpbnMiOlsiaHR0cHM6Ly9mbXAubW9tZW50YS53b3JrcyIsImh0dHA6Ly9sb2NhbGhvc3Q6ODAwMCIsImh0dHBzOi8vZmxlZXRvcHMubW9tZW50YS53b3JrcyJdLCJyZWFsbV9hY2Nlc3MiOnsicm9sZXMiOlsiZGVmYXVsdC1yb2xlcy1tb21lbnRhLXByb2QiLCJvZmZsaW5lX2FjY2VzcyIsInVtYV9hdXRob3JpemF0aW9uIl19LCJyZXNvdXJjZV9hY2Nlc3MiOnsiZGZkaS1jb25zb2xlIjp7InJvbGVzIjpbInVzZXIiXX0sInNpbXVsYXRpb24iOnsicm9sZXMiOlsidXNlciJdfSwibXZpeiI6eyJyb2xlcyI6WyJtdml6LXBsYXllciJdfSwiYWNjb3VudCI6eyJyb2xlcyI6WyJtYW5hZ2UtYWNjb3VudCIsIm1hbmFnZS1hY2NvdW50LWxpbmtzIiwidmlldy1wcm9maWxlIl19fSwic2NvcGUiOiJvcGVuaWQgcHJvZmlsZSBlbWFpbCIsImVtYWlsX3ZlcmlmaWVkIjpmYWxzZSwibmFtZSI6IlJ5YW4gTGkiLCJwcmVmZXJyZWRfdXNlcm5hbWUiOiJyeWFuLmxpIiwic2Vzc2lvbl9zdGF0ZSI6IjU2ZDk1YjEyLTk1MWUtNDM0Ny04MWUyLWI4YWUzY2FmODgxMyIsImdpdmVuX25hbWUiOiJSeWFuIiwiZmFtaWx5X25hbWUiOiJMaSIsImVtYWlsIjoicnlhbi5saUBtb21lbnRhLmFpIn0.signature",
+  "fmp_access_token": null
+}

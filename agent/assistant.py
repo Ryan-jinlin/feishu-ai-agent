@@ -88,19 +88,19 @@ _ROUTE_EXTRACT_SKILL_CONTENT: str = _load_simple_skill("route-extract")
 _APA_SNAPSHOT_SKILL_CONTENT: str = _load_simple_skill("apa-mviz-snapshot")
 _CPM_SKILL_CONTENT: str = _load_simple_skill("cpm")
 
-# 庙香山周例会内容缓存（每4小时自动预加载，注入到CPM场景的system prompt）
+# Project-MXS周例会内容缓存（每4小时自动预加载，注入到CPM场景的system prompt）
 _CPM_WEEKLY_CACHE: dict = {"content": "", "updated_at": None}
 _CPM_WEEKLY_LOCK = threading.Lock()
 
 
 def preload_cpm_weekly_meeting() -> None:
-    """预加载庙香山最新周例会页面内容，供CPM场景system prompt使用。"""
+    """预加载Project-MXS最新周例会页面内容，供CPM场景system prompt使用。"""
     import json as _json
     from datetime import datetime as _dt
     try:
         # 搜索最新周例会页面（返回JSON格式）
         result = subprocess.run(
-            [*_FEISHU_SYNC_CMD, "search_wiki", "庙香山 周例会"],
+            [*_FEISHU_SYNC_CMD, "search_wiki", "Project-MXS 周例会"],
             capture_output=True, timeout=30, encoding="utf-8", errors="replace",
         )
         output = result.stdout.strip()
@@ -129,7 +129,7 @@ def preload_cpm_weekly_meeting() -> None:
             summary = content[:4000]
             with _CPM_WEEKLY_LOCK:
                 _CPM_WEEKLY_CACHE["content"] = (
-                    f"### 庙香山最新周例会（预加载于 {_dt.now().strftime('%m-%d %H:%M')}）\n\n{summary}"
+                    f"### Project-MXS最新周例会（预加载于 {_dt.now().strftime('%m-%d %H:%M')}）\n\n{summary}"
                 )
                 _CPM_WEEKLY_CACHE["updated_at"] = _dt.now()
             logger.info("CPM preload OK: %d chars, url=%s", len(content), latest_url)
@@ -163,9 +163,9 @@ _FEISHU_PROJECT_SKILL_CONTENT: str = _load_feishu_project_skill()
 
 # CPM 岗位助理触发词
 _CPM_TRIGGERS = (
-    "庙香山", "vas", "车型适配", "cma", "ota", "发版", "准出", "周例会",
+    "Project-MXS", "vas", "车型适配", "cma", "ota", "发版", "准出", "周例会",
     "p301", "c095", "c100", "c255", "p201", "c001", "c101",
-    "红旗", "odc", "锁版", "toc", "sop", "ccm", "客户问题",
+    "Client-A", "odc", "锁版", "toc", "sop", "ccm", "客户问题",
     "cpm", "ppm", "fst", "fit", "mtbf",
 )
 
@@ -420,19 +420,19 @@ class PersonalAssistant:
 - 工作流：提取项目名称和 T0 日期 → 调用 generate_pm_plan → 返回 HTML 路径和飞书链接
 - 飞书 Drive 文件夹 URL 格式 `https://momenta.feishu.cn/drive/folder/XXXXXXXX`，URL 末尾字符串即为 drive_folder_token
 
-### 11. 车辆预约（庙香山）
-使用 **book_vehicle** 工具在「庙香山安全员协调」群向 Fleet-Bot 发预约请求，自动完成预约和审批。
-- 触发词：帮我预约 XXX 车、约车、预约车辆、约 C100/C101/P301 系列的车
-- 必填：vehicle_id（车辆 ID，如 C100108620-A43902）、time_range（用车时间范围）
+### 11. 车辆预约（Project-MXS）
+使用 **book_vehicle** 工具在「Project-MXS安全员协调」群向 Fleet-Bot 发预约请求，自动完成预约和审批。
+- 触发词：帮我预约 XXX 车、约车、预约车辆、约 Vehicle-C/Vehicle-C1/Vehicle-P 系列的车
+- 必填：vehicle_id（车辆 ID，如 Vehicle-C108620-A43902）、time_range（用车时间范围）
 - 可选：task_name（任务名称，默认「集成测试」）、project（归属项目，默认不填）
 - 工作流：提取车辆 ID 和时间范围 → 调用 book_vehicle → Fleet-Bot 自动处理预约审批
 - **信息不全时先向用户询问车辆 ID 和用车时间，不得猜测**
-- 车辆 ID 格式示例：C100108620-A43902、P301008620-B78738、C101108620-S62002
+- 车辆 ID 格式示例：Vehicle-C108620-A43902、Vehicle-P008620-B78738、Vehicle-C1108620-S62002
 
 ### 12. FMP 车辆空闲查询
 使用 **check_fmp_vehicles** 工具查询 FMP 平台上归属指定项目的空闲车辆。
 - 触发词：哪些车空闲、FMP 查车、有哪些可用的车、查一下车辆状态
-- 可选：project（默认「庙香山」）、hours（查询未来几小时，默认 8）
+- 可选：project（默认「Project-MXS」）、hours（查询未来几小时，默认 8）
 - 若 FMP session 未授权，返回登录脚本指引（`python scripts/fmp_login.py`）
 - 工作流：check_fmp_vehicles → 返回空闲/占用车辆列表
 

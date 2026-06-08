@@ -974,7 +974,7 @@ TOOL_DEFINITIONS = [
         "name": "check_fmp_vehicles",
         "description": (
             "查询 FMP 平台上归属指定项目的车辆空闲状态。\n"
-            "使用场景：用户问「庙香山现在有哪些空闲车」「哪辆车可以约」「FMP 上的车辆情况」等。\n"
+            "使用场景：用户问「Project-MXS现在有哪些空闲车」「哪辆车可以约」「FMP 上的车辆情况」等。\n"
             "返回空闲车辆列表和占用车辆列表。\n"
             "若 FMP session 未授权，会提示用户先运行登录脚本。"
         ),
@@ -983,8 +983,8 @@ TOOL_DEFINITIONS = [
             "properties": {
                 "project": {
                     "type": "string",
-                    "description": "查询的项目/归属名称，如「庙香山」「Highway」，默认「庙香山」",
-                    "default": "庙香山",
+                    "description": "查询的项目/归属名称，如「Project-MXS」「Highway」，默认「Project-MXS」",
+                    "default": "Project-MXS",
                 },
                 "hours": {
                     "type": "number",
@@ -999,8 +999,8 @@ TOOL_DEFINITIONS = [
     {
         "name": "book_vehicle",
         "description": (
-            "在「庙香山安全员协调」群里向 Fleet-Bot 发送车辆预约请求，完成预约并自动审批。\n"
-            "使用场景：用户说「帮我预约 XXX 车」「约 C100 那辆车」「预约车辆到22点」等车辆预约需求。\n"
+            "在「Project-MXS安全员协调」群里向 Fleet-Bot 发送车辆预约请求，完成预约并自动审批。\n"
+            "使用场景：用户说「帮我预约 XXX 车」「约 Vehicle-C 那辆车」「预约车辆到22点」等车辆预约需求。\n"
             "发送后 Fleet-Bot 会自动处理预约流程，无需人工再点击确认。"
         ),
         "input_schema": {
@@ -1008,7 +1008,7 @@ TOOL_DEFINITIONS = [
             "properties": {
                 "vehicle_id": {
                     "type": "string",
-                    "description": "车辆 ID，例如 C100108620-A43902、P301008620-B78738、C255-7836",
+                    "description": "车辆 ID，例如 Vehicle-C108620-A43902、Vehicle-P008620-B78738、Vehicle-C2-7836",
                 },
                 "time_range": {
                     "type": "string",
@@ -1021,7 +1021,7 @@ TOOL_DEFINITIONS = [
                 },
                 "project": {
                     "type": "string",
-                    "description": "归属项目，例如「庙香山」。不填则不添加归属信息",
+                    "description": "归属项目，例如「Project-MXS」。不填则不添加归属信息",
                     "default": "",
                 },
             },
@@ -3221,7 +3221,7 @@ class ToolExecutor:
 
     def _check_fmp_vehicles(
         self,
-        project: str = "庙香山",
+        project: str = "Project-MXS",
         hours: float = 8,
     ) -> str:
         """查询 FMP 平台指定项目的空闲/占用车辆。"""
