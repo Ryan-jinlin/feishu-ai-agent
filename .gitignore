@@ -29,3 +29,6 @@ __pycache__/
 *.egg-info/
 .venv/
 venv/
+
+bot.log
+start_bot.vbs
