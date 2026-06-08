@@ -341,7 +341,8 @@ TOOL_DEFINITIONS = [
             "  需要 title + drawio_content（drawio XML 文本）；ref_url 可选（指定目标知识库父页面）。\n\n"
             "• group_summary — 按需触发群聊摘要（biweekly/monthly/quarterly）。"
             "日报/周报由系统自动触发，无需调用此工具。"
-            "摘要将发布到飞书 Wiki 并发送 DM 通知。\n\n"
+            "摘要将发布到飞书 Wiki 并发送 DM 通知。\n"
+            "• calendar_events — 查询用户本周日历事件，返回会议列表（标题、时间、地点）。无需额外参数。\n\n"
             "典型工作流：search → read_page（了解内容）→ create_page / edit_page（写入）\n"
             "修改 PPTX 时序图工作流：read_page（获取 obj_token）→ inspect_pptx（查看形状坐标）→ edit_pptx（替换文字 + 移动形状）"
         ),
@@ -350,7 +351,7 @@ TOOL_DEFINITIONS = [
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["search", "read_page", "list_pages", "create_page", "edit_page", "move_page", "send_message", "recall_message", "list_groups", "create_group", "delete_group", "get_group_members", "read_group_messages", "apply_mentions", "inspect_pptx", "edit_pptx", "create_task", "create_doc", "drawio_to_board", "group_summary"],
+                    "enum": ["search", "read_page", "list_pages", "create_page", "edit_page", "move_page", "send_message", "recall_message", "list_groups", "create_group", "delete_group", "get_group_members", "read_group_messages", "apply_mentions", "inspect_pptx", "edit_pptx", "create_task", "create_doc", "drawio_to_board", "group_summary", "calendar_events"],
                     "description": "操作类型",
                 },
                 "query": {
@@ -968,6 +969,100 @@ TOOL_DEFINITIONS = [
             "required": ["mode", "v0", "limits"],
         },
     },
+    # ── 车辆 FMP 查询模块 ──────────────────────────────────────────
+    {
+        "name": "check_fmp_vehicles",
+        "description": (
+            "查询 FMP 平台上归属指定项目的车辆空闲状态。\n"
+            "使用场景：用户问「庙香山现在有哪些空闲车」「哪辆车可以约」「FMP 上的车辆情况」等。\n"
+            "返回空闲车辆列表和占用车辆列表。\n"
+            "若 FMP session 未授权，会提示用户先运行登录脚本。"
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "project": {
+                    "type": "string",
+                    "description": "查询的项目/归属名称，如「庙香山」「Highway」，默认「庙香山」",
+                    "default": "庙香山",
+                },
+                "hours": {
+                    "type": "number",
+                    "description": "查询未来几小时内的空闲情况，默认 8 小时",
+                    "default": 8,
+                },
+            },
+            "required": [],
+        },
+    },
+    # ── 车辆预约模块 ────────────────────────────────────────────────
+    {
+        "name": "book_vehicle",
+        "description": (
+            "在「庙香山安全员协调」群里向 Fleet-Bot 发送车辆预约请求，完成预约并自动审批。\n"
+            "使用场景：用户说「帮我预约 XXX 车」「约 C100 那辆车」「预约车辆到22点」等车辆预约需求。\n"
+            "发送后 Fleet-Bot 会自动处理预约流程，无需人工再点击确认。"
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "vehicle_id": {
+                    "type": "string",
+                    "description": "车辆 ID，例如 C100108620-A43902、P301008620-B78738、C255-7836",
+                },
+                "time_range": {
+                    "type": "string",
+                    "description": "用车时间范围，例如「从现在到22:00」「今天14:00到22:00」「明天上午10点到晚上22点」",
+                },
+                "task_name": {
+                    "type": "string",
+                    "description": "用车任务名称，例如「集成测试」「数据采集」「执行器验收」，默认「集成测试」",
+                    "default": "集成测试",
+                },
+                "project": {
+                    "type": "string",
+                    "description": "归属项目，例如「庙香山」。不填则不添加归属信息",
+                    "default": "",
+                },
+            },
+            "required": ["vehicle_id", "time_range"],
+        },
+    },
+    # ── 故障码查询模块 ───────────────────────────────────────────────
+    {
+        "name": "query_bag_fault",
+        "description": (
+            "根据 VIN + 时间范围查询车辆 /mff_md/enable_signal_cmd 故障（enable_signal_cmd 信号）。\n"
+            "从 ESS 查询触发事件，通过 pybagmining 按 topic 精准读取 bag 数据（无需下载整包），\n"
+            "解析 error_code 并对照故障码映射表输出故障名称和受影响功能列表。\n"
+            "典型场景：「查一下这辆车有没有故障」「这个 VIN 的 enable_signal_cmd 有没有 error」"
+            "「帮我看看这车 HNP 为什么进不去」"
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "vin": {
+                    "type": "string",
+                    "description": "17 位 VIN 码，例如 LFPH4ACL9T2A37871",
+                },
+                "time_points": {
+                    "type": "string",
+                    "description": (
+                        "查询时间，多个时间点用空格分隔：\n"
+                        "• YYYY-MM-DD — 整天\n"
+                        "• YYYY-MM-DDTHH:MM:SS — 精确时刻（±5min窗口）\n"
+                        "• 两个日期表示范围，如 '2026-05-15 2026-05-22'"
+                    ),
+                },
+                "size": {
+                    "type": "integer",
+                    "description": "最多查询多少个 ESS 事件（默认 20，时间段较长时可调大）",
+                    "default": 20,
+                },
+            },
+            "required": ["vin", "time_points"],
+        },
+    },
 ]
 
 
@@ -1014,6 +1109,12 @@ class ToolExecutor:
             return self._find_skills(**tool_input)
         if tool_name == "np_aeb_calc":
             return self._np_aeb_calc(**tool_input)
+        if tool_name == "book_vehicle":
+            return self._book_vehicle(**tool_input)
+        if tool_name == "check_fmp_vehicles":
+            return self._check_fmp_vehicles(**tool_input)
+        if tool_name == "query_bag_fault":
+            return self._query_bag_fault(**tool_input)
         return f"未知工具: {tool_name}"
 
     # ── 会邀 ──────────────────────────────────────────────────────
@@ -1036,7 +1137,7 @@ class ToolExecutor:
         work_start: str = "09:00",
         work_end: str = "18:00",
     ) -> str:
-        """查询多人共同空闲时间，返回可安排会议的时间段列表。"""
+        """查询共同空闲时间。使用 feishu-sync 获取个人日历忙碌时段。"""
         # 解析目标日期
         if not date:
             target_date = datetime.now(TZ_SHANGHAI).date()
@@ -1055,8 +1156,30 @@ class ToolExecutor:
             datetime(target_date.year, target_date.month, target_date.day, eh, em)
         )
 
-        # 查询所有用户忙碌时段
-        freebusy = self.feishu.query_freebusy(user_open_ids, day_start, day_end)
+        # 使用 feishu-sync 获取个人日历事件（替代已失效的 freebusy API）
+        freebusy: dict[str, list[dict]] = {}
+        try:
+            raw = self._run_feishu_cli("calendar_events", "--json", timeout=20)
+            if not raw.startswith("[飞书"):
+                events = json.loads(raw)
+                busy_slots = []
+                for ev in events:
+                    try:
+                        ts_start = int(ev["start_time"]["timestamp"])
+                        ts_end = int(ev["end_time"]["timestamp"])
+                        ev_start = datetime.fromtimestamp(ts_start, tz=TZ_SHANGHAI)
+                        ev_end = datetime.fromtimestamp(ts_end, tz=TZ_SHANGHAI)
+                        if ev_start.date() == target_date and ev.get("free_busy_status") == "busy":
+                            busy_slots.append({"start": ev_start.isoformat(), "end": ev_end.isoformat()})
+                    except Exception:
+                        pass
+                # 用第一个 open_id 代表本人（拥有个人日历访问权限）
+                if user_open_ids:
+                    freebusy[user_open_ids[0]] = busy_slots
+        except Exception as e:
+            logger.warning("feishu-sync calendar_events 失败: %s", e)
+
+        other_users = user_open_ids[1:] if len(user_open_ids) > 1 else []
 
         # 合并所有用户的忙碌区间
         all_busy: list[tuple[datetime, datetime]] = []
@@ -1099,17 +1222,23 @@ class ToolExecutor:
             suggestions.append((slot, slot + duration))
             slot += timedelta(minutes=30)
 
+        note = ""
+        if other_users:
+            note = f"\n（注：仅基于你的日历，{len(other_users)} 位邀请者的日历无法自动查询，请自行确认他们的空闲。）"
+
         if not suggestions:
             return (
                 f"{target_date} 全天在工作时间 {work_start}-{work_end} 内，"
-                f"找不到所有 {len(user_open_ids)} 人都空闲的 {duration_minutes} 分钟时间段。"
+                f"找不到 {duration_minutes} 分钟的空闲时间段。{note}"
             )
 
         lines = [
-            f"{target_date} 共同空闲时段（{len(user_open_ids)} 人均可，会议时长 {duration_minutes} 分钟）：",
+            f"{target_date} 你的空闲时段（会议时长 {duration_minutes} 分钟）：",
         ]
         for i, (s, e) in enumerate(suggestions, 1):
             lines.append(f"  {i}. {s.strftime('%H:%M')} - {e.strftime('%H:%M')}")
+        if note:
+            lines.append(note)
         lines.append("\n请确认时间后，告诉我开始时间，我来创建会议并发送邀请。")
         return "\n".join(lines)
 
@@ -1767,7 +1896,14 @@ class ToolExecutor:
             except Exception as e:
                 return f"group_summary 执行失败：{e}"
 
-        return f"未知 feishu_action: {action}。支持: search, read_page, list_pages, create_page, edit_page, move_page, send_message, recall_message, list_groups, create_group, get_group_members, read_group_messages, apply_mentions, inspect_pptx, edit_pptx, create_task, create_doc, drawio_to_board, group_summary"
+        if action == "calendar_events":
+            try:
+                raw = self._run_feishu_cli("calendar_events", timeout=20)
+                return raw if raw else "未获取到日历事件"
+            except Exception as e:
+                return f"查询日历失败：{e}"
+
+        return f"未知 feishu_action: {action}。支持: search, read_page, list_pages, create_page, edit_page, move_page, send_message, recall_message, list_groups, create_group, get_group_members, read_group_messages, apply_mentions, inspect_pptx, edit_pptx, create_task, create_doc, drawio_to_board, group_summary, calendar_events"
 
     def _run_feishu_cli(self, *args: str, timeout: int = 30) -> str:
         """调用 feishu-sync-cli，返回 stdout 字符串；失败时自动重试最多 2 次"""
@@ -1779,6 +1915,8 @@ class ToolExecutor:
             try:
                 # 用全局锁串行化，防止多线程并发读写同一份 token 文件产生竞态
                 with _FEISHU_CLI_LOCK:
+                    env = os.environ.copy()
+                    env["PYTHONIOENCODING"] = "utf-8"
                     result = subprocess.run(
                         cmd,
                         capture_output=True,
@@ -1786,6 +1924,7 @@ class ToolExecutor:
                         timeout=timeout,
                         encoding="utf-8",
                         errors="replace",
+                        env=env,
                     )
                 if result.returncode == 0:
                     return result.stdout.strip()
@@ -3077,6 +3216,139 @@ class ToolExecutor:
             return result.stdout.strip()
         except Exception as e:
             return f"计算异常：{e}"
+
+    # ── 车辆 FMP 查询 ───────────────────────────────────────────────
+
+    def _check_fmp_vehicles(
+        self,
+        project: str = "庙香山",
+        hours: float = 8,
+    ) -> str:
+        """查询 FMP 平台指定项目的空闲/占用车辆。"""
+        try:
+            from feishu.fmp import check_session_valid, query_idle_vehicles
+        except ImportError as e:
+            return f"FMP 模块导入失败：{e}"
+
+        if not check_session_valid():
+            return (
+                "⚠️ FMP 尚未授权，请先运行登录脚本：\n"
+                "```\n"
+                "python C:/Users/ryan.li/personal-assistant/scripts/fmp_login.py\n"
+                "```\n"
+                "在弹出的浏览器中用 Momenta 账号登录 FMP，登录完成后 bot 即可自动查询。"
+            )
+
+        result = query_idle_vehicles(project=project, end_hours=int(hours))
+
+        if result.get("error"):
+            return f"FMP 查询失败：{result['error']}"
+
+        idle = result.get("idle", [])
+        busy = result.get("busy", [])
+        total = result.get("total", len(idle) + len(busy))
+        q_time = result.get("query_time", "")
+
+        lines = [f"# FMP 车辆状态 — {project}"]
+        lines.append(f"查询时间段：{q_time}，共 {total} 辆")
+        lines.append("")
+
+        if idle:
+            lines.append(f"## ✅ 空闲车辆（{len(idle)} 辆）")
+            lines.append("| 车辆 ID | 车牌 | 车型 | 维保状态 |")
+            lines.append("|--------|------|------|----------|")
+            for c in idle:
+                lines.append(
+                    f"| {c['car_id']} | {c['car_plate']} | {c['car_type']} | {c['maintain_status'] or '正常'} |"
+                )
+        else:
+            lines.append("## ✅ 空闲车辆：暂无")
+
+        lines.append("")
+        if busy:
+            lines.append(f"## 🔴 占用中（{len(busy)} 辆）")
+            for c in busy:
+                lines.append(f"- {c['car_plate']} ({c['car_type']})")
+
+        return "\n".join(lines)
+
+    # ── 故障码查询 ───────────────────────────────────────────────────
+
+    _BAG_FAULT_SCRIPT = "/mnt/c/Users/ryan.li/Desktop/bag-fault-query/bag_fault_query.py"
+    _BAG_FAULT_PYTHON = "/root/bagenv/bin/python3"
+
+    def _query_bag_fault(self, vin: str, time_points: str, size: int = 20) -> str:
+        """通过 WSL 运行 bag_fault_query.py 查询 /mff_md/enable_signal_cmd 故障。"""
+        vin = vin.strip().upper()
+        if len(vin) != 17:
+            return f"[错误] VIN 必须是 17 位，当前: {vin!r}"
+
+        time_args = time_points.strip().split()
+        cmd = [
+            "wsl", "-d", "Ubuntu", "--",
+            "bash", "-c",
+            f"{self._BAG_FAULT_PYTHON} {self._BAG_FAULT_SCRIPT} "
+            f"{vin} {' '.join(time_args)} --size {size} 2>&1 | grep -v pybagmining",
+        ]
+        logger.info("_query_bag_fault: %s %s size=%d", vin, time_args, size)
+        try:
+            result = subprocess.run(cmd, capture_output=True, timeout=180)
+            output = result.stdout.decode("utf-8", errors="replace").strip()
+            stderr  = result.stderr.decode("utf-8", errors="replace").strip()
+            if not output and stderr:
+                return f"[错误] 查询失败：\n{stderr}"
+            if result.returncode != 0 and not output:
+                return f"[错误] 脚本退出码 {result.returncode}，无输出"
+            return output or "查询完成，无输出"
+        except subprocess.TimeoutExpired:
+            return "[错误] 查询超时（>180s），ESS 或 bag 服务可能繁忙，请稍后重试"
+        except FileNotFoundError:
+            return "[错误] 未找到 wsl 命令，请确认 WSL Ubuntu 已安装"
+        except Exception as e:
+            return f"[错误] 查询异常：{e}"
+
+    # ── 车辆预约 ────────────────────────────────────────────────────
+
+    _FLEET_BOT_OPEN_ID = "ou_d9fc64ef0fd2949a226b50d79ea0ee09"
+    _SAFETY_GROUP_CHAT_ID = "oc_c75f4dca2c72189e94f84dc555813939"
+
+    def _book_vehicle(
+        self,
+        vehicle_id: str,
+        time_range: str,
+        task_name: str = "集成测试",
+        project: str = "",
+    ) -> str:
+        """私发 Fleet-Bot 发送车辆预约请求（以 Ryan 用户身份发送）。"""
+        body_parts = [f"约车并审批{vehicle_id}，{task_name}，{time_range}"]
+        if project:
+            body_parts.append(f"归属{project}")
+        msg = "，".join(body_parts)
+        logger.info("_book_vehicle: 私发 Fleet-Bot: %s", msg)
+        try:
+            from feishu_sync.api import send_message as _feishu_sync_send
+            import json as _json
+            result = _feishu_sync_send(
+                receive_id=self._FLEET_BOT_OPEN_ID,
+                msg_type="text",
+                content=_json.dumps({"text": msg}),
+                receive_id_type="open_id",
+                as_user=True,
+            )
+            mid = result.get("message_id", "") if isinstance(result, dict) else ""
+        except Exception as e:
+            logger.error("_book_vehicle 私发失败: %s", e)
+            mid = ""
+        if mid:
+            return (
+                f"已私发 Fleet-Bot 发送车辆预约请求，Fleet-Bot 将自动处理预约和审批。\n"
+                f"- 车辆：{vehicle_id}\n"
+                f"- 任务：{task_name}\n"
+                f"- 时间：{time_range}\n"
+                + (f"- 归属：{project}\n" if project else "")
+                + f"message_id={mid}"
+            )
+        return "预约消息发送失败，请检查 feishu-sync 是否已授权。"
 
 
 # ------------------------------------------------------------------ #

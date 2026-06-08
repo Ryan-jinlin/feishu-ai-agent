@@ -18,14 +18,9 @@ import requests
 
 logger = logging.getLogger(__name__)
 
-_MCP_KEY = "m-2127104a-3bb6-44b6-abb4-33f0c20f4026"
 _MCP_BASE = "https://project.feishu.cn/mcp_server/v1"
 _TIMEOUT = 30
 _counter = itertools.count(1)
-
-
-def _mcp_url(user_key: str) -> str:
-    return f"{_MCP_BASE}?mcpKey={_MCP_KEY}&userKey={user_key}"
 
 
 def _call(user_key: str, method: str, params: dict | None = None) -> Any:
@@ -36,11 +31,14 @@ def _call(user_key: str, method: str, params: dict | None = None) -> Any:
         "method": method,
         "params": params or {},
     }
-    url = _mcp_url(user_key)
     resp = requests.post(
-        url,
+        _MCP_BASE,
         json=payload,
-        headers={"Accept": "application/json", "Content-Type": "application/json"},
+        headers={
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "X-Mcp-Token": user_key,
+        },
         timeout=_TIMEOUT,
     )
     resp.raise_for_status()

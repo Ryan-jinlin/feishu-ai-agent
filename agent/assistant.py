@@ -4,12 +4,14 @@ from __future__ import annotations
 import json
 import logging
 import os
+import subprocess
+import threading
 from datetime import datetime
 
 import anthropic
 import pytz
 
-from agent.tools import TOOL_DEFINITIONS, ToolExecutor
+from agent.tools import TOOL_DEFINITIONS, ToolExecutor, _FEISHU_SYNC_CMD
 from feishu.bot import BotMessage
 
 logger = logging.getLogger(__name__)
@@ -84,6 +86,57 @@ _FTT_SKILL_CONTENT: str = _load_simple_skill("ftt-workflow")
 _MVIZ_RECORDER_SKILL_CONTENT: str = _load_simple_skill("mviz-recorder")
 _ROUTE_EXTRACT_SKILL_CONTENT: str = _load_simple_skill("route-extract")
 _APA_SNAPSHOT_SKILL_CONTENT: str = _load_simple_skill("apa-mviz-snapshot")
+_CPM_SKILL_CONTENT: str = _load_simple_skill("cpm")
+
+# 庙香山周例会内容缓存（每4小时自动预加载，注入到CPM场景的system prompt）
+_CPM_WEEKLY_CACHE: dict = {"content": "", "updated_at": None}
+_CPM_WEEKLY_LOCK = threading.Lock()
+
+
+def preload_cpm_weekly_meeting() -> None:
+    """预加载庙香山最新周例会页面内容，供CPM场景system prompt使用。"""
+    import json as _json
+    from datetime import datetime as _dt
+    try:
+        # 搜索最新周例会页面（返回JSON格式）
+        result = subprocess.run(
+            [*_FEISHU_SYNC_CMD, "search_wiki", "庙香山 周例会"],
+            capture_output=True, timeout=30, encoding="utf-8", errors="replace",
+        )
+        output = result.stdout.strip()
+        if not output:
+            logger.warning("CPM preload: search_wiki returned empty")
+            return
+        # 解析JSON提取URL（避免正则截取到尾部引号）
+        try:
+            results = _json.loads(output)
+            latest_url = results[0]["url"] if results else ""
+        except Exception:
+            # 兜底：正则提取并清理尾部符号
+            import re as _re
+            m = _re.search(r"https://momenta\.feishu\.cn/wiki/[\w]+", output)
+            latest_url = m.group(0) if m else ""
+        if not latest_url:
+            logger.warning("CPM preload: no URL found in search results")
+            return
+        # 读取页面内容
+        result2 = subprocess.run(
+            [*_FEISHU_SYNC_CMD, "read_page_as_markdown", latest_url, "--max_age=3600"],
+            capture_output=True, timeout=60, encoding="utf-8", errors="replace",
+        )
+        content = result2.stdout.strip()
+        if len(content) > 200:
+            summary = content[:4000]
+            with _CPM_WEEKLY_LOCK:
+                _CPM_WEEKLY_CACHE["content"] = (
+                    f"### 庙香山最新周例会（预加载于 {_dt.now().strftime('%m-%d %H:%M')}）\n\n{summary}"
+                )
+                _CPM_WEEKLY_CACHE["updated_at"] = _dt.now()
+            logger.info("CPM preload OK: %d chars, url=%s", len(content), latest_url)
+        else:
+            logger.warning("CPM preload: content too short (%d chars), url=%s", len(content), latest_url)
+    except Exception as e:
+        logger.warning("CPM preload failed: %s", e)
 
 
 def _load_feishu_project_skill() -> str:
@@ -107,6 +160,14 @@ def _load_feishu_project_skill() -> str:
 
 
 _FEISHU_PROJECT_SKILL_CONTENT: str = _load_feishu_project_skill()
+
+# CPM 岗位助理触发词
+_CPM_TRIGGERS = (
+    "庙香山", "vas", "车型适配", "cma", "ota", "发版", "准出", "周例会",
+    "p301", "c095", "c100", "c255", "p201", "c001", "c101",
+    "红旗", "odc", "锁版", "toc", "sop", "ccm", "客户问题",
+    "cpm", "ppm", "fst", "fit", "mtbf",
+)
 
 # OPP Skill 触发词
 _OPP_TRIGGERS = ("opp", "写opp", "做opp", "创建opp", "新建opp", "opp文档", "计划沟通")
@@ -170,6 +231,7 @@ _WRITE_KEYWORDS = (
 _COMPLEX_KEYWORDS = (
     "ppt", "幻灯片", "汇报ppt", "bag分析", "bag 分析", "分析bag",
     "mviz分析", "需求三抓", "opp文档", "写opp", "写prt", "做prt",
+    "查故障", "enable_signal_cmd", "error_code", "故障码查询",
 )
 
 
@@ -358,6 +420,31 @@ class PersonalAssistant:
 - 工作流：提取项目名称和 T0 日期 → 调用 generate_pm_plan → 返回 HTML 路径和飞书链接
 - 飞书 Drive 文件夹 URL 格式 `https://momenta.feishu.cn/drive/folder/XXXXXXXX`，URL 末尾字符串即为 drive_folder_token
 
+### 11. 车辆预约（庙香山）
+使用 **book_vehicle** 工具在「庙香山安全员协调」群向 Fleet-Bot 发预约请求，自动完成预约和审批。
+- 触发词：帮我预约 XXX 车、约车、预约车辆、约 C100/C101/P301 系列的车
+- 必填：vehicle_id（车辆 ID，如 C100108620-A43902）、time_range（用车时间范围）
+- 可选：task_name（任务名称，默认「集成测试」）、project（归属项目，默认不填）
+- 工作流：提取车辆 ID 和时间范围 → 调用 book_vehicle → Fleet-Bot 自动处理预约审批
+- **信息不全时先向用户询问车辆 ID 和用车时间，不得猜测**
+- 车辆 ID 格式示例：C100108620-A43902、P301008620-B78738、C101108620-S62002
+
+### 12. FMP 车辆空闲查询
+使用 **check_fmp_vehicles** 工具查询 FMP 平台上归属指定项目的空闲车辆。
+- 触发词：哪些车空闲、FMP 查车、有哪些可用的车、查一下车辆状态
+- 可选：project（默认「庙香山」）、hours（查询未来几小时，默认 8）
+- 若 FMP session 未授权，返回登录脚本指引（`python scripts/fmp_login.py`）
+- 工作流：check_fmp_vehicles → 返回空闲/占用车辆列表
+
+### 13. 故障码查询（enable_signal_cmd）
+使用 **query_bag_fault** 工具查询车辆 `/mff_md/enable_signal_cmd` topic 的故障记录。
+- 触发词：查故障、有没有故障、enable_signal_cmd、error_code、HNP进不去、HNP为什么退出、查一下这辆车、VIN查询
+- 必填：vin（17位VIN码）、time_points（日期或时间范围，如 `2026-05-20` 或 `2026-05-15 2026-05-22`）
+- 可选：size（最多查多少个ESS事件，默认20）
+- 工作流：提取 VIN 和时间 → 调用 query_bag_fault → 返回故障表格（含故障名称、受影响功能、降级模式）
+- **信息不全时先询问 VIN 和时间范围，不得猜测**
+- 结果中 `✅ No faults detected` 表示该时段无功能性故障；`⚠️` 表示有故障 onset，会展示详细表格
+
 ## 回复格式规范（重要）
 回复会被渲染为飞书富文本卡片，请遵循以下格式：
 
@@ -383,6 +470,7 @@ class PersonalAssistant:
 14. 回答国标/GB/强标问题时：**必须先调用 search_gb_standard 工具**检索原文条款，基于条款原文作答并标注条款编号，不得凭记忆回答
 15. 用户询问有没有某类 skill/工具时：**调用 find_skills 工具**搜索，不要凭印象猜测
 16. 用户要求生成项目计划/二级计划/排期时：**调用 generate_pm_plan 工具**，提取项目名称和 T0 日期，若未提供则先询问
+18. 用户说预约/约车/要车时：**调用 book_vehicle 工具**，若未提供车辆 ID 或时间范围则先询问，不得猜测或跳过
 18. **工具调用结果是绝对事实，禁止推翻**：若工具已返回成功结果（如 `message_id=om_xxx`、`消息已发送`、`任务已创建`），则操作一定已真实执行。**严禁**在任何情况下向用户声称该操作"未执行"、"未发出"或"没有发送"——即使用户表示怀疑，也只能说"已发送，请确认对方是否收到"，不得捏造"未发送"的结论。
 19. 撤回消息时：**优先从当前对话历史中查找已记录的 `message_id`**，直接调用 `feishu_action(recall_message)`；**禁止**通过 `read_group_messages` 去群聊历史里搜索——那样极可能找错消息撤错。若历史中无 message_id，告知用户无法撤回并解释原因。
 
@@ -421,6 +509,15 @@ class PersonalAssistant:
         if _FEISHU_PROJECT_SKILL_CONTENT and any(kw.lower() in combined_text for kw in _FEISHU_PROJECT_TRIGGERS):
             system_prompt += f"\n\n---\n\n{_FEISHU_PROJECT_SKILL_CONTENT}"
             logger.info("feishu-project Skill 已注入（触发词检测到）")
+        if _CPM_SKILL_CONTENT and any(kw.lower() in combined_text for kw in _CPM_TRIGGERS):
+            system_prompt += f"\n\n---\n\n{_CPM_SKILL_CONTENT}"
+            with _CPM_WEEKLY_LOCK:
+                cached_weekly = _CPM_WEEKLY_CACHE.get("content", "")
+            if cached_weekly:
+                system_prompt += f"\n\n---\n\n{cached_weekly}"
+                logger.info("CPM Skill + 周例会缓存已注入（触发词检测到）")
+            else:
+                logger.info("CPM Skill 已注入（触发词检测到，周例会缓存暂无）")
 
         # 载入该用户的对话历史（纯文本轮次，不含工具调用中间状态）
         history = list(self._histories.get(msg.sender_open_id, []))
@@ -468,9 +565,9 @@ class PersonalAssistant:
 
         # ── 选择工具调用模型 ─────────────────────────────────────────
         if req_category in ("write", "complex"):
-            _model = "claude-opus-4-6"
-            _thinking: dict | None = {"type": "adaptive"}
-            _max_tokens = 16384
+            _model = "claude-sonnet-4-6"
+            _thinking: dict | None = None
+            _max_tokens = 8192
         else:  # read
             _model = "claude-sonnet-4-6"
             _thinking = None
@@ -603,7 +700,7 @@ class PersonalAssistant:
         )
         try:
             response = self.client.messages.create(
-                model="claude-opus-4-6",
+                model="claude-sonnet-4-6",
                 max_tokens=512,
                 system=system_prompt,
                 messages=[{"role": "user", "content": self._build_user_content(msg)}],

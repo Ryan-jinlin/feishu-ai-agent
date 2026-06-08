@@ -46,7 +46,7 @@ def _ensure_single_instance() -> None:
         f.write(str(os.getpid()))
     atexit.register(lambda: os.path.exists(_PID_FILE) and os.remove(_PID_FILE))
 
-from agent.assistant import PersonalAssistant
+from agent.assistant import PersonalAssistant, preload_cpm_weekly_meeting
 from agent.daily_summary import DailySummaryJob
 from agent.tools import ToolExecutor, _PENDING_EVENTS, _save_pending_events
 from feishu.bot import BotMessage, MentionedUser
@@ -595,14 +595,19 @@ if __name__ == "__main__":
     # 周报：每周一 00:01:00，HOT + ACTIVE 群（≤7天有消息）
     scheduler.add_job(daily_summary.run_weekly, "cron", day_of_week="mon", hour=0, minute=1, id="weekly_summary")
     scheduler.add_job(_warmup_feishu_token, "interval", minutes=90, id="token_warmup")
+    # 庙香山周例会内容预加载：每4小时刷新一次
+    scheduler.add_job(preload_cpm_weekly_meeting, "interval", hours=4, id="cpm_preload")
     scheduler.start()
     logger.info("RSVP 轮询任务已启动（每 5 分钟）")
     logger.info("每日摘要任务已启动（每天 00:00:05，仅 HOT 群）")
     logger.info("每周摘要任务已启动（每周一 00:01:00，HOT+ACTIVE 群）")
     logger.info("feishu-sync token 预热任务已启动（每 90 分钟）")
+    logger.info("CPM 周例会预加载任务已启动（每 4 小时）")
 
     # 启动时立即预热一次（后台执行，不阻塞 WS 启动）
     threading.Thread(target=_warmup_feishu_token, daemon=True, name="token-warmup-init").start()
+    # 启动时立即预加载一次庙香山周例会
+    threading.Thread(target=preload_cpm_weekly_meeting, daemon=True, name="cpm-preload-init").start()
 
     event_handler = (
         lark.EventDispatcherHandler.builder("", "")
