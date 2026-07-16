@@ -1,0 +1,1444 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>飞书 AI Agent 系统设计</title>
+<style>
+  @page { size: A4; margin: 0; }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: "Microsoft YaHei", "PingFang SC", "Helvetica Neue", sans-serif;
+    font-size: 11pt;
+    line-height: 1.8;
+    color: #1a1a2e;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* ===== COVER ===== */
+  .cover {
+    width: 210mm; height: 297mm;
+    background: linear-gradient(160deg, #0a0e27 0%, #16213e 40%, #0f3460 100%);
+    color: white;
+    display: flex; flex-direction: column; justify-content: center; align-items: center;
+    text-align: center;
+    page-break-after: always;
+    position: relative;
+    overflow: hidden;
+  }
+  .cover::before {
+    content: "";
+    position: absolute; top: -100px; right: -100px;
+    width: 500px; height: 500px;
+    border: 2px solid rgba(255,255,255,0.06);
+    border-radius: 50%;
+  }
+  .cover::after {
+    content: "";
+    position: absolute; bottom: -80px; left: -80px;
+    width: 350px; height: 350px;
+    border: 2px solid rgba(255,255,255,0.04);
+    border-radius: 50%;
+  }
+  .cover .tag {
+    font-size: 10pt; letter-spacing: 6pt; text-transform: uppercase;
+    color: rgba(255,255,255,0.5); margin-bottom: 40px;
+    position: relative; z-index: 1;
+  }
+  .cover h1 {
+    font-size: 36pt; font-weight: 700; letter-spacing: 3pt;
+    margin-bottom: 16px; position: relative; z-index: 1;
+  }
+  .cover .subtitle {
+    font-size: 14pt; color: rgba(255,255,255,0.7);
+    line-height: 2; position: relative; z-index: 1;
+  }
+  .cover .divider {
+    width: 60px; height: 3px; background: #4dabf7;
+    margin: 32px auto; position: relative; z-index: 1;
+  }
+  .cover .meta {
+    font-size: 10pt; color: rgba(255,255,255,0.45);
+    margin-top: 48px; line-height: 2.2; position: relative; z-index: 1;
+  }
+
+  /* ===== PAGE LAYOUT ===== */
+  .page {
+    width: 210mm; min-height: 297mm;
+    padding: 22mm 20mm 20mm 20mm;
+    page-break-after: always;
+    position: relative;
+  }
+  .page:last-child { page-break-after: avoid; }
+
+  /* ===== MODULE HEADER ===== */
+  .module-label {
+    font-size: 9pt; letter-spacing: 4pt; color: #4dabf7;
+    font-weight: 600; margin-bottom: 8px;
+  }
+  .page h2 {
+    font-size: 22pt; font-weight: 700; color: #0a0e27;
+    margin-bottom: 10px; letter-spacing: 1pt;
+  }
+  .page h3 {
+    font-size: 14pt; font-weight: 700; color: #16213e;
+    margin: 28px 0 12px 0; padding-bottom: 6px;
+    border-bottom: 1px solid #e8e8e8;
+  }
+  .page h4 {
+    font-size: 11pt; font-weight: 700; color: #333;
+    margin: 18px 0 8px 0;
+  }
+  .page p { margin-bottom: 10px; }
+  .page p.lead {
+    font-size: 12pt; color: #555; line-height: 2;
+    margin-bottom: 24px;
+  }
+
+  /* ===== STATS ROW ===== */
+  .stats-row {
+    display: flex; gap: 16px; margin: 20px 0 28px 0;
+  }
+  .stat-card {
+    flex: 1; background: #f8f9fc; border-radius: 8px;
+    padding: 16px; text-align: center;
+    border-top: 3px solid #4dabf7;
+  }
+  .stat-card .num {
+    font-size: 22pt; font-weight: 700; color: #0a0e27;
+  }
+  .stat-card .label {
+    font-size: 8pt; color: #888; margin-top: 4px;
+  }
+
+  /* ===== TABLES ===== */
+  table {
+    width: 100%; border-collapse: collapse;
+    margin: 16px 0; font-size: 9.5pt;
+  }
+  th {
+    background: #0a0e27; color: white;
+    padding: 8px 10px; text-align: left; font-weight: 600;
+  }
+  td {
+    padding: 7px 10px; border-bottom: 1px solid #eee;
+  }
+  tr:nth-child(even) td { background: #fafbfc; }
+
+  /* ===== DESIGN PRINCIPLE CARDS ===== */
+  .principle-grid {
+    display: flex; gap: 14px; margin: 18px 0;
+  }
+  .principle-card {
+    flex: 1; background: white; border: 1px solid #e0e0e0;
+    border-radius: 8px; padding: 16px;
+  }
+  .principle-card .icon {
+    width: 36px; height: 36px; border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 16pt; margin-bottom: 10px;
+    background: #f0f4ff; color: #4dabf7;
+  }
+  .principle-card h4 { font-size: 11pt; margin: 0 0 6px 0; border: none; padding: 0; }
+  .principle-card p { font-size: 9pt; color: #666; line-height: 1.6; }
+
+  /* ===== ARCHITECTURE LAYERS ===== */
+  .arch-layer {
+    margin: 12px 0; border-radius: 8px; overflow: hidden;
+    border: 1px solid #e0e0e0;
+  }
+  .arch-layer .layer-header {
+    padding: 10px 14px; font-weight: 700; font-size: 10pt;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .arch-layer .layer-body {
+    padding: 12px 14px; font-size: 9pt; color: #555;
+    background: #fafbfc; line-height: 1.7;
+  }
+  .layer-1 .layer-header { background: #0a0e27; color: white; }
+  .layer-2 .layer-header { background: #16213e; color: white; }
+  .layer-3 .layer-header { background: #0f3460; color: white; }
+  .layer-4 .layer-header { background: #1a508b; color: white; }
+
+  /* ===== FLOW ARROWS ===== */
+  .flow-arrow {
+    text-align: center; color: #4dabf7; font-size: 14pt;
+    margin: 4px 0;
+  }
+
+  /* ===== MECHANISM LIST ===== */
+  .mech-item {
+    display: flex; gap: 12px; margin: 12px 0;
+    padding: 12px; background: #f8f9fc; border-radius: 6px;
+    border-left: 3px solid #4dabf7;
+  }
+  .mech-item .mech-num {
+    font-size: 16pt; font-weight: 700; color: #4dabf7;
+    min-width: 30px; text-align: center;
+  }
+  .mech-item .mech-body h4 { margin: 0 0 4px 0; font-size: 10pt; border: none; padding: 0; }
+  .mech-item .mech-body p { font-size: 9pt; color: #666; margin: 0; line-height: 1.6; }
+
+  /* ===== SKILL CARD ===== */
+  .skill-card {
+    border: 1px solid #e0e0e0; border-radius: 8px;
+    padding: 16px; margin: 10px 0; background: white;
+  }
+  .skill-card h4 {
+    font-size: 11pt; margin: 0 0 6px 0; border: none; padding: 0;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .skill-card .badge {
+    font-size: 7pt; padding: 2px 6px; border-radius: 4px;
+    font-weight: 600; letter-spacing: 1pt;
+  }
+  .badge-prompt { background: #fff3cd; color: #856404; }
+  .badge-code { background: #d4edda; color: #155724; }
+  .skill-card .tools {
+    display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px;
+  }
+  .skill-card .tools span {
+    font-size: 8pt; background: #f0f4ff; color: #4dabf7;
+    padding: 2px 8px; border-radius: 10px;
+  }
+
+  /* ===== TIMELINE ===== */
+  .timeline-item {
+    display: flex; gap: 16px; margin: 10px 0; padding: 10px 0;
+    border-bottom: 1px solid #f0f0f0;
+  }
+  .timeline-item .time {
+    font-size: 9pt; font-weight: 700; color: #4dabf7;
+    min-width: 65px;
+  }
+  .timeline-item .content h4 { margin: 0 0 4px 0; font-size: 10pt; border: none; padding: 0; }
+  .timeline-item .content p { font-size: 9pt; color: #666; margin: 0; }
+
+  /* ===== TAG ===== */
+  .tag-row { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+  .tag-item {
+    font-size: 8pt; padding: 4px 10px; border-radius: 12px;
+    background: #f0f4ff; color: #4dabf7; font-weight: 500;
+  }
+
+  /* ===== TWO COL ===== */
+  .two-col { display: flex; gap: 20px; }
+  .two-col > div { flex: 1; }
+
+  /* ===== HIGHLIGHT BOX ===== */
+  .highlight-box {
+    background: linear-gradient(135deg, #f0f4ff, #e8f0fe);
+    border-radius: 8px; padding: 16px 20px;
+    margin: 16px 0; font-size: 10pt;
+    border-left: 4px solid #4dabf7;
+  }
+  .highlight-box strong { color: #0a0e27; }
+
+  /* ===== DIAGRAM (ASCII-style in styled box) ===== */
+  .diagram-box {
+    background: #fafbfc; border: 1px solid #e0e0e0;
+    border-radius: 8px; padding: 20px; margin: 14px 0;
+    font-family: "Consolas", "Courier New", monospace;
+    font-size: 9pt; line-height: 1.6; color: #333;
+    white-space: pre; overflow-x: auto;
+  }
+
+  /* ===== FOOTER ===== */
+  .page-footer {
+    position: absolute; bottom: 12mm; left: 20mm; right: 20mm;
+    font-size: 7pt; color: #bbb; display: flex;
+    justify-content: space-between;
+  }
+
+  .page-break { page-break-before: always; }
+</style>
+</head>
+<body>
+
+<!-- ═══════════════ COVER ═══════════════ -->
+<div class="cover">
+  <div class="tag">AI Agent · Autonomous Driving R&D</div>
+  <h1>飞书 AI Agent</h1>
+  <div class="divider"></div>
+  <p class="subtitle">
+    面向自动驾驶研发场景的智能工作台<br>
+    深度集成 ESS · Mviz · FMP，打通故障诊断到项目交付的全链路
+  </p>
+  <p class="meta">
+    李金林（Ryan Li）<br>
+    Momenta · 2025.03 — 2026.04<br>
+    本文档生成于 2026 年 7 月
+  </p>
+</div>
+
+<!-- ═══════════════ MODULE 01: 产品概述 ═══════════════ -->
+<div class="page">
+  <div class="module-label">MODULE 01</div>
+  <h2>产品概述</h2>
+  <p class="lead">
+    飞书 AI Agent 是一个面向<strong>自动驾驶研发场景</strong>的智能工作台。它以飞书为企业协作入口，
+    Claude API 为推理引擎，深度集成 ESS（车辆数据平台）、Mviz（可视化分析）、FMP（车辆管理）等
+    领域系统，打通「车辆故障诊断 → Bag 数据挖掘 → 知识库 RAG 检索 → 项目计划生成 → 国标条款检索」的完整研发链路。
+    同时覆盖会议邀约、知识库 RAG、群聊摘要等通用办公场景。系统上线 10 个月，累计处理消息 10,000+ 条，
+    服务团队 50+ 人。
+  </p>
+
+  <div class="stats-row">
+    <div class="stat-card">
+      <div class="num">10,000+</div>
+      <div class="label">累计处理消息</div>
+    </div>
+    <div class="stat-card">
+      <div class="num">17</div>
+      <div class="label">工具模块</div>
+    </div>
+    <div class="stat-card">
+      <div class="num">&lt; 3s</div>
+      <div class="label">平均响应延迟</div>
+    </div>
+    <div class="stat-card">
+      <div class="num">99%</div>
+      <div class="label">系统在线率</div>
+    </div>
+    <div class="stat-card">
+      <div class="num">~60%</div>
+      <div class="label">模型路由成本节约</div>
+    </div>
+  </div>
+
+  <h3>核心业务场景</h3>
+  <table>
+    <tr><th style="width:16%">业务场景</th><th style="width:28%">传统痛点</th><th>Agent 驱动的闭环</th></tr>
+    <tr>
+      <td><strong>车辆故障诊断</strong></td>
+      <td>诊断工程师拿到 VIN → 登录 ESS 平台 → 人工筛选 Bag → 逐一比对 23 万条故障码表 → 手工撰写诊断报告。单次耗时 15-30 分钟。</td>
+      <td>飞书输入「查 VIN xxx 昨天的 enable_signal_cmd」→ Agent 自动定位对应 Bag → 解析故障 Topic → 匹配故障码映射表 → 输出结构化报告（故障名称 / 受影响功能 / 降级模式 / 严重度），<strong>耗时 &lt; 5 秒</strong>。支持交叉分析——同时段多个故障码自动关联推理根因。</td>
+    </tr>
+    <tr>
+      <td><strong>Mviz 数据挖掘</strong></td>
+      <td>算法工程师定位问题需打开 Mviz Web → 搜索 Stream → 查找 ROS Topic → 下载数据 → 本地分析。多步操作分散在 3 个系统。</td>
+      <td>飞书对话中直接搜 Stream → 查 Topic 定义 → 下载指定帧数据 → Claude 基于数据给出分析结论。<strong>四步操作一条消息完成</strong>，中间结果自动缓存复用。</td>
+    </tr>
+    <tr>
+      <td><strong>飞书知识库 RAG 检索</strong></td>
+      <td>团队知识分散在飞书 Wiki、云文档、多维表格、妙记等不同载体中。传统检索需逐一切换应用 → 关键词搜索 → 人工翻阅 → 跨文档关联依赖个人记忆。</td>
+      <td>Agent 在对话中直接理解查询意图 → 调用 feishu_action(search) 全局搜索 → read_page 获取全文 → Claude 基于原文回答。<strong>轻量级 RAG</strong>：不做离线 Embedding 索引，而是实时搜索 + 全文注入 Prompt，兼顾准确性和零维护成本。</td>
+    </tr>
+    <tr>
+      <td><strong>项目排期生成</strong></td>
+      <td>项目经理根据 SOP 模板手工排甘特图，需对齐 T0/T+4W/T+10W/T+18W/T+20W 里程碑，涉及底盘联调/控制匹配/相机/Radar/超声/域控/CP主线等 10+ 模块的时间线编排。</td>
+      <td>飞书输入「生成 XX 项目二级计划，T0=2026-08-01」→ Agent 自动生成 HTML 甘特图 + HD PNG，按标准里程碑编排全部模块任务，<strong>一键上传飞书云盘和 Wiki</strong>。支持自定义里程碑和模块覆盖。</td>
+    </tr>
+    <tr>
+      <td><strong>车辆预约与调度</strong></td>
+      <td>测试工程师需手动查看 FMP 平台空闲车辆 → 在群内发消息预约 → 等待审批。信息不对称导致车辆利用率低。</td>
+      <td>「查哪些车空闲」「帮我预约 Vehicle-C xxx 明天 9-12 点」→ Agent 查询 FMP 实时状态 → 自动向 Fleet-Bot 发预约请求 → 审批结果即时反馈。</td>
+    </tr>
+    <tr>
+      <td><strong>GB 强标合规检索</strong></td>
+      <td>工程师遇到合规疑问 → 翻阅 PDF 版 GB 报批稿 → 关键词搜索定位条款 → 人工判断适用性。搜索精度依赖个人经验。</td>
+      <td>飞书对话中自然语言提问「L2++ 领航功能对 TTC 的要求是什么」→ Agent 检索 GB 强标原文条款 → 基于条款原文作答 → <strong>标注条款编号和出处</strong>。不得凭记忆回答（System Prompt 硬约束）。</td>
+    </tr>
+  </table>
+  <p style="font-size:9pt;color:#999;margin-top:8px;">此外，系统还覆盖<strong>会议邀约</strong>（search → availability → create → RSVP 追踪全流程）、<strong>群聊摘要</strong>（六级活跃度分级调度）、<strong>非 Owner 权限隔离</strong>等通用协作场景。</p>
+  <div class="page-footer"><span>飞书 AI Agent 系统设计</span><span>1</span></div>
+</div>
+
+<!-- ═══════════════ MODULE 02: 系统架构 ═══════════════ -->
+<div class="page">
+  <div class="module-label">MODULE 02</div>
+  <h2>系统架构</h2>
+  <p class="lead">
+    系统采用四层架构，从 WebSocket 消息接入到工具执行形成完整闭环。核心设计哲学：
+    <strong>「Skill 即 Prompt」</strong>——每个专项能力就是一段注入 LLM 的指令文本，不改代码即可扩展。
+  </p>
+
+  <h3>架构总览</h3>
+
+  <!-- 系统架构图 -->
+  <div style="margin:16px 0;font-family:'Microsoft YaHei',sans-serif;">
+    <!-- 顶层：飞书用户 -->
+    <div style="display:flex;justify-content:center;margin-bottom:6px;">
+      <div style="background:#e8f0fe;border:1.5px solid#4dabf7;border-radius:20px;padding:5px 24px;font-size:9pt;font-weight:700;color:#0f3460;">
+        飞书用户（群聊 / 私信）
+      </div>
+    </div>
+
+    <!-- 箭头 -->
+    <div style="text-align:center;color:#4dabf7;font-size:14pt;margin:2px 0;">▼ WebSocket 长连接</div>
+
+    <!-- Layer 1 -->
+    <div style="background:#0a0e27;color:white;border-radius:8px;padding:8px 14px;margin-bottom:2px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <div style="font-size:9pt;font-weight:700;">🔌 Layer 1 · 接入层</div>
+        <div style="font-size:7pt;color:#aaa;">main_ws.py</div>
+      </div>
+      <div style="display:flex;gap:10px;margin-top:4px;font-size:7.5pt;color:#ccc;">
+        <span>单实例守护</span><span style="color:#555;">|</span>
+        <span>消息去重</span><span style="color:#555;">|</span>
+        <span>AES 解密</span><span style="color:#555;">|</span>
+        <span>消息分发</span><span style="color:#555;">|</span>
+        <span>后台调度</span>
+      </div>
+    </div>
+
+    <!-- 箭头 -->
+    <div style="text-align:center;color:#4dabf7;font-size:12pt;margin:1px 0;">▼</div>
+
+    <!-- Layer 2 — 三列 -->
+    <div style="background:#16213e;color:white;border-radius:8px;padding:10px 14px;margin-bottom:2px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+        <div style="font-size:9pt;font-weight:700;">🧠 Layer 2 · Agent 核心</div>
+        <div style="font-size:7pt;color:#aaa;">assistant.py</div>
+      </div>
+      <div style="display:flex;gap:8px;">
+        <div style="flex:1;background:rgba(255,255,255,0.08);border-radius:6px;padding:6px 8px;text-align:center;">
+          <div style="font-size:7.5pt;font-weight:700;color:#4dabf7;margin-bottom:3px;">1. 请求分类</div>
+          <div style="font-size:7pt;color:#ccc;line-height:1.5;">simple→Haiku<br>read/write→Sonnet</div>
+        </div>
+        <div style="flex:1;background:rgba(255,255,255,0.08);border-radius:6px;padding:6px 8px;text-align:center;">
+          <div style="font-size:7.5pt;font-weight:700;color:#4dabf7;margin-bottom:3px;">2. Prompt 组装</div>
+          <div style="font-size:7pt;color:#ccc;line-height:1.5;">13项能力描述<br>+ Skill 动态注入</div>
+        </div>
+        <div style="flex:1;background:rgba(255,255,255,0.08);border-radius:6px;padding:6px 8px;text-align:center;">
+          <div style="font-size:7.5pt;font-weight:700;color:#4dabf7;margin-bottom:3px;">3. Tool Use 循环</div>
+          <div style="font-size:7pt;color:#ccc;line-height:1.5;">Claude↔Executor<br>最多 16 轮</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 箭头 -->
+    <div style="text-align:center;color:#4dabf7;font-size:12pt;margin:1px 0;">▼ function calling</div>
+
+    <!-- Layer 3 — 工具网格 -->
+    <div style="background:#0f3460;color:white;border-radius:8px;padding:10px 14px;margin-bottom:2px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+        <div style="font-size:9pt;font-weight:700;">🔧 Layer 3 · 工具层 — 17 个 JSON Schema + ToolExecutor</div>
+        <div style="font-size:7pt;color:#aaa;">tools.py</div>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:4px;">
+        <span style="background:rgba(255,255,255,0.12);padding:2px 7px;border-radius:4px;font-size:7pt;">search_users</span>
+        <span style="background:rgba(255,255,255,0.12);padding:2px 7px;border-radius:4px;font-size:7pt;">create_meeting</span>
+        <span style="background:rgba(255,255,255,0.12);padding:2px 7px;border-radius:4px;font-size:7pt;">query_availability</span>
+        <span style="background:rgba(255,255,255,0.12);padding:2px 7px;border-radius:4px;font-size:7pt;">cancel_meeting</span>
+        <span style="background:rgba(77,171,247,0.3);padding:2px 7px;border-radius:4px;font-size:7pt;font-weight:700;">feishu_action (22种)</span>
+        <span style="background:rgba(255,255,255,0.12);padding:2px 7px;border-radius:4px;font-size:7pt;">generate_ppt</span>
+        <span style="background:rgba(255,255,255,0.12);padding:2px 7px;border-radius:4px;font-size:7pt;">bag_analysis</span>
+        <span style="background:rgba(255,255,255,0.12);padding:2px 7px;border-radius:4px;font-size:7pt;">feishu_project</span>
+        <span style="background:rgba(255,255,255,0.12);padding:2px 7px;border-radius:4px;font-size:7pt;">search_gb_standard</span>
+        <span style="background:rgba(255,255,255,0.12);padding:2px 7px;border-radius:4px;font-size:7pt;">generate_pm_plan</span>
+        <span style="background:rgba(255,255,255,0.12);padding:2px 7px;border-radius:4px;font-size:7pt;">book_vehicle</span>
+        <span style="background:rgba(255,255,255,0.12);padding:2px 7px;border-radius:4px;font-size:7pt;">query_bag_fault</span>
+        <span style="background:rgba(255,255,255,0.12);padding:2px 7px;border-radius:4px;font-size:7pt;">find_skills</span>
+        <span style="background:rgba(255,255,255,0.12);padding:2px 7px;border-radius:4px;font-size:7pt;">check_fmp_vehicles</span>
+        <span style="background:rgba(255,255,255,0.12);padding:2px 7px;border-radius:4px;font-size:7pt;">run_code</span>
+      </div>
+    </div>
+
+    <!-- 箭头 -->
+    <div style="text-align:center;color:#4dabf7;font-size:12pt;margin:1px 0;">▼ API 调用</div>
+
+    <!-- Layer 4 — 两列 -->
+    <div style="background:#1a508b;color:white;border-radius:8px;padding:10px 14px;margin-bottom:2px;">
+      <div style="font-size:9pt;font-weight:700;margin-bottom:6px;">🌐 Layer 4 · 平台层</div>
+      <div style="display:flex;gap:8px;">
+        <div style="flex:1;background:rgba(255,255,255,0.08);border-radius:6px;padding:6px 8px;">
+          <div style="font-size:7.5pt;font-weight:700;color:#7ec8ff;margin-bottom:3px;">飞书 API</div>
+          <div style="font-size:7pt;color:#ccc;line-height:1.5;">消息 · 日历 · 文档<br>Wiki · 项目 · 云盘</div>
+        </div>
+        <div style="flex:1;background:rgba(255,255,255,0.08);border-radius:6px;padding:6px 8px;">
+          <div style="font-size:7.5pt;font-weight:700;color:#7ec8ff;margin-bottom:3px;">研发系统</div>
+          <div style="font-size:7pt;color:#ccc;line-height:1.5;">ESS（车辆数据）<br>Mviz（可视化）<br>FMP（车辆管理）</div>
+        </div>
+        <div style="flex:1;background:rgba(255,255,255,0.08);border-radius:6px;padding:6px 8px;">
+          <div style="font-size:7.5pt;font-weight:700;color:#7ec8ff;margin-bottom:3px;">基础设施</div>
+          <div style="font-size:7pt;color:#ccc;line-height:1.5;">Token 自动刷新<br>SQLite 消息缓存<br>APScheduler</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 右侧标注 -->
+    <div style="display:flex;justify-content:flex-end;gap:16px;margin-top:4px;">
+      <div style="font-size:6.5pt;color:#999;">← 消息流入</div>
+      <div style="font-size:6.5pt;color:#999;">回复流出 →</div>
+    </div>
+  </div>
+
+  <p style="font-size:8pt;color:#999;margin-top:8px;margin-bottom:14px;">▲ 四层架构：消息自顶向下流动，回复沿原路径返回。Layer 3 的 feishu_action 是聚合型工具（高亮），内部包含 22 种飞书操作。</p>
+
+  <h3>一条消息的完整旅程</h3>
+  <div class="diagram-box">用户: "帮我约张三明天下午开会"
+    │
+    ▼
+WebSocket 推送 → 单实例检查 → 消息去重 → AES 解密
+    │
+    ▼
+消息解析: 提取文本 + @mention + 图片 MIME 检测
+    │
+    ▼
+Agent 核心: 分类请求("write") → 组装 System Prompt → 选择 Sonnet 4.6
+    │
+    ▼
+┌─ Tool Use 循环 ─────────────────────────────────────┐
+│ Claude → tool_use: search_users("张三")                │
+│   → ToolExecutor 执行 → 返回 open_id                   │
+│ Claude → tool_use: query_availability(...)            │
+│   → ToolExecutor 执行 → 返回空闲时段                   │
+│ Claude → 确认时间 → tool_use: create_meeting(...)     │
+│   → ToolExecutor 执行 → 登记 RSVP 追踪 → 返回 event_id │
+│ Claude → end_turn: "会议已创建！"                      │
+└──────────────────────────────────────────────────────┘
+    │
+    ▼
+回复渲染为飞书消息卡片 → 发送到用户
+
+[后台任务持续运行]
+RSVP 轮询(5min) · Token 预热(90min) · 日报(00:00) · CPM 预加载(4h)</div>
+
+  <div class="page-footer"><span>飞书 AI Agent 系统设计</span><span>2</span></div>
+</div>
+
+<!-- ═══════════════ MODULE 03: 核心设计 ═══════════════ -->
+<div class="page page-break">
+  <div class="module-label">MODULE 03</div>
+  <h2>核心设计决策</h2>
+
+  <h3>设计原则</h3>
+  <div class="principle-grid">
+    <div class="principle-card">
+      <div class="icon">🎯</div>
+      <h4>Prompt 即代码</h4>
+      <p>每个 Skill 就是一段注入 LLM 的指令文本。新增能力 = 新增一个 SKILL.md + 触发词列表，不改核心循环。</p>
+    </div>
+    <div class="principle-card">
+      <div class="icon">⚡</div>
+      <h4>分级响应</h4>
+      <p>不是所有消息都需要最强模型。"你好"走 Haiku 秒回，复杂任务走 Sonnet+工具。路由策略节省 60% API 费用。</p>
+    </div>
+    <div class="principle-card">
+      <div class="icon">🛡️</div>
+      <h4>边界优先</h4>
+      <p>19 条格式规则 + 防呆机制不是在设计阶段想出来的，是 10 个月生产运行中逐条追加的。</p>
+    </div>
+  </div>
+
+  <h3>关键决策</h3>
+  <table>
+    <tr><th style="width:20%">决策点</th><th style="width:22%">我们的选择</th><th>理由与权衡</th></tr>
+    <tr>
+      <td>通信协议</td>
+      <td>WebSocket 长连接</td>
+      <td>IM 消息要求实时推送。HTTP 轮询模式在 50+ 用户规模下延迟高且浪费带宽。飞书官方 SDK 封装了重连和心跳逻辑。</td>
+    </tr>
+    <tr>
+      <td>LLM 引擎</td>
+      <td>Claude API (Anthropic)</td>
+      <td>同期 Function Calling 准确率优于 GPT-4，中文理解更自然。Opus/Sonnet/Haiku 三级模型可灵活路由。</td>
+    </tr>
+    <tr>
+      <td>工具粒度</td>
+      <td>聚合型：1 个大工具含 22 个 action</td>
+      <td>如果飞书 22 种操作各自独立为 Tool，Tool List 膨胀到 40+。聚合后保持 17 个 Tool，Claude 先选工具再选 action，两级决策更精准。</td>
+    </tr>
+    <tr>
+      <td>Skill 加载</td>
+      <td>触发词匹配 → 动态注入 Prompt</td>
+      <td>始终加载全部 Skill 会让 Prompt 膨胀到 5000+ 行。触发词在应用层匹配（含历史对话上下文），零延迟零成本。</td>
+    </tr>
+    <tr>
+      <td>上下文窗口</td>
+      <td>每用户保留 6 轮对话</td>
+      <td>太少丢失上下文（用户说"好"无法关联上轮），太多浪费 Token。6 轮覆盖 90% 的多轮交互场景。</td>
+    </tr>
+    <tr>
+      <td>单实例保障</td>
+      <td>PID 文件锁 + SIGTERM → SIGKILL</td>
+      <td>多实例并发会导致共享 Token 文件损坏。先优雅终止，1 秒后强制杀死。atexit 注册清理函数。</td>
+    </tr>
+  </table>
+
+  <h3>模型路由策略</h3>
+  <div class="diagram-box">用户消息
+  ├─ 含图片? → 跳过 Haiku（不支持视觉）→ Sonnet
+  ├─ "你好"/"谢谢" → <strong>simple</strong> → Haiku 4.5 (零工具, 精简Prompt, <1s)
+  │     └─ 失败 → 自动降级 Sonnet（用户无感知）
+  ├─ "PPT"/"bag分析"/"需求三抓" → <strong>complex</strong> → Sonnet 4.6
+  ├─ "创建"/"发送"/"生成" → <strong>write</strong> → Sonnet 4.6
+  └─ 其他查询 → <strong>read</strong> → Sonnet 4.6
+
+  效果: simple 占 40% 消息量，综合节省 ~60% API 成本</div>
+  <div class="page-footer"><span>飞书 AI Agent 系统设计</span><span>3</span></div>
+</div>
+
+<!-- ═══════════════ MODULE 04: Skill 体系 ═══════════════ -->
+<div class="page page-break">
+  <div class="module-label">MODULE 04</div>
+  <h2>Skill 体系</h2>
+  <p class="lead">
+    Skill 是本系统的核心能力单元。每个 Skill 由两部分组成：<strong>SKILL.md</strong>（Prompt 指令，告诉 LLM 何时触发、如何操作）
+    和<strong>源码</strong>（Python 实现，执行实际的 API 调用与数据处理）。两者分离使得新增 Skill 无需改动核心 Agent 循环。
+  </p>
+
+  <div class="skill-card">
+    <h4>
+      🔧 Bag Fault Query — 车辆故障诊断
+      <span class="badge badge-prompt">SKILL.md</span>
+      <span class="badge badge-code">bag_fault_query.py · 25KB</span>
+    </h4>
+    <p style="font-size:9pt;color:#666;margin-bottom:6px;">
+      自动驾驶车辆故障诊断专用 Skill。输入 17 位 VIN + 时间范围 → 通过 ESS API 定位对应 Bag →
+      读取 /mff_md/enable_signal_cmd topic → 匹配 <strong>23 万条故障码映射表</strong> → 输出结构化诊断报告
+      （含故障名称、受影响功能、降级模式、严重度评级）。支持 <strong>因果推理</strong>——同时段多个故障码自动分析关联性。
+    </p>
+    <div class="tools">
+      <span>VIN定位</span><span>ESS事件查询</span><span>enable_signal_cmd解析</span>
+      <span>230K故障码匹配</span><span>因果推理</span>
+    </div>
+  </div>
+
+  <div class="skill-card">
+    <h4>
+      📋 CPM Assistant — 多车型项目追踪
+      <span class="badge badge-prompt">纯 Prompt Skill</span>
+    </h4>
+    <p style="font-size:9pt;color:#666;margin-bottom:6px;">
+      CPM（客户项目经理）岗位专用 Skill，内置 <strong>红旗项目 7 款车型</strong>（P301/C095/C100/C255/C001/C101/P201）的完整状态、
+      核心缩写词表（VAS/CMA/OTA/ODC/SOP 等）、VAS 车型适配 8 节点流程。
+      触发词命中后自动注入 <strong>4 小时预加载的最新周例会内容</strong>——零额外延迟即可获取项目最新进展。
+    </p>
+    <div class="tools">
+      <span>触发词路由</span><span>7车型状态注入</span><span>周例会预加载(4h)</span>
+      <span>VAS 8节点流程</span><span>CCM客户问题追踪</span>
+    </div>
+  </div>
+
+  <div class="skill-card">
+    <h4>
+      🏠 Personal Assistant — 通用办公自动化
+      <span class="badge badge-prompt">SKILL.md · 300行</span>
+      <span class="badge badge-code">run_tool.py · 7KB</span>
+    </h4>
+    <p style="font-size:9pt;color:#666;margin-bottom:6px;">
+      始终在线的基础能力层，覆盖 14 种办公场景。包含 <strong>Mviz Bag 数据分析</strong>（search_streams → lookup → download_topic）、
+      <strong>飞书项目 MCP 管理</strong>（MOQL 高级查询）、<strong>GB 强标检索</strong>、<strong>L2++ 项目甘特图生成</strong>、
+      <strong>车辆预约</strong>、会议全流程管理、知识库 RAG、IM 消息收发等。
+    </p>
+    <div class="tools">
+      <span>bag_analysis</span><span>feishu_project(MCP)</span><span>search_gb_standard</span>
+      <span>generate_pm_plan</span><span>book_vehicle</span><span>search_users</span>
+      <span>create_meeting</span><span>feishu_action(22种)</span><span>generate_ppt</span>
+      <span>find_skills</span><span>query_availability</span><span>cancel_meeting</span>
+    </div>
+  </div>
+
+  <div class="skill-card">
+    <h4>
+      🎧 Project Bot Customer Service — 团队协作
+      <span class="badge badge-prompt">SKILL.md</span>
+      <span class="badge badge-code">run_tool.py · 13KB</span>
+    </h4>
+    <p style="font-size:9pt;color:#666;margin-bottom:6px;">
+      面向项目团队的独立 Bot 实例，权限与个人助理完全隔离。提供 14 项工具：日历查询、飞书项目 MOQL 查询、
+      PPT 生成、群聊历史批量抓取、Wiki 访问白名单管理等。以独立 Bot 身份运行。
+    </p>
+    <div class="tools">
+      <span>get_calendar_events</span><span>feishu_project(MCP)</span><span>create_meeting</span>
+      <span>send_direct_message</span><span>send_group_at_message</span><span>run_python_script</span>
+      <span>fetch_chat_history</span><span>feishu_sync</span><span>create_feishu_doc</span>
+      <span>access_control</span>
+    </div>
+  </div>
+
+  <h3>Skill 触发机制</h3>
+  <div class="highlight-box">
+    <strong>设计思路</strong>：基础能力始终在 System Prompt 中，专项 Skill 通过<strong>触发词匹配</strong>动态注入。
+    匹配在应用层完成（<code>用户消息 + 对话历史</code>），不额外调用 LLM，零延迟零成本。
+    例如用户说「Project-MXS 现在进展怎么样」→ 命中 CPM 触发词 → 注入 CPM Skill 指令 + 预加载的周例会内容。
+    新增一个 Skill 只需三步：写 SKILL.md → 定义触发词列表 → 注册到 assistant.py，核心循环无需改动。
+  </div>
+  <div class="page-footer"><span>飞书 AI Agent 系统设计</span><span>4</span></div>
+</div>
+
+<!-- ═══════════════ CASE STUDY: Bag Fault Query ═══════════════ -->
+<div class="page page-break">
+  <div class="module-label">CASE STUDY</div>
+  <h2>典型案例：Bag Fault Query 深度拆解</h2>
+  <p class="lead">
+    这是本系统<strong>集成深度最深、部署考量最完整</strong>的 Skill。单次查询跨越 4 层外部系统，
+    展示了 Agent 如何在自动驾驶研发场景中实现「一句话替代 15 分钟手动操作」。
+    更关键的是，它内置了<strong>环境自检机制</strong>，让任何工程师都能一键验证部署环境是否就绪。
+  </p>
+
+  <h3>数据管线</h3>
+  <div class="diagram-box" style="font-size:9pt;line-height:1.8;">用户输入: "查 VIN LSVUM40Z6MN123456 7月15号有没有故障"
+
+① VIN 解析 — 17位 VIN 正则校验，提取厂牌/车型/年款元信息
+    ↓
+② ESS 事件定位 — query_bag_fault() → ESS API
+   输入: VIN + time_range(2026-07-15)
+   输出: 匹配的 Bag 列表（event_id / 时间戳 / 存储路径）
+   关键: <strong>size 参数控制查询范围（默认20），避免海量回扫压垮 ESS</strong>
+    ↓
+③ Topic 数据解析 — 定位 Bag → 读取 /mff_md/enable_signal_cmd topic
+   提取故障码 onset 事件（signal_name + timestamp + value）
+   依赖: pybagmining + roslz4（LZ4 解压）— 需要在 Linux 环境运行
+    ↓
+④ 故障码映射 — 查表 error_code_map.json（<strong>239,762 条</strong>）
+   "0x12345678" → {name:"ESP_FAULT", function:"车身稳定控制",
+                    degrade:"ESP功能受限, 限速80km/h", severity:"功能性故障"}
+    ↓
+⑤ 报告生成 — Claude 基于结构化故障列表做<strong>因果推理</strong>
+   例如: ESP_FAULT + CAN_TIMEOUT 同时出现在 08:23
+        → 推断"底盘通信超时触发 ESP 安全降级"</div>
+
+  <h3>环境自检机制</h3>
+  <p style="font-size:10pt;color:#555;margin-bottom:12px;">
+    为了让其他团队也能独立部署这个 Skill（而非依赖 Bot 开发者手动配置），
+    内置了 <code>--check</code> 模式：<strong>8 项逐层检查，每项附带修复指引</strong>。
+  </p>
+
+  <div class="diagram-box" style="font-size:9pt;line-height:1.7;">$ python bag_fault_query.py --check
+
+============================================================
+  Environment check — bag_fault_query
+============================================================
+  ✅  Python       3.9.7
+  ✅  requests     2.31.0
+  ✅  pybagmining  0.3.2
+  ✅  roslz4       (LZ4 解压可用)
+  ✅  error_code_map.json  (239,762 条记录)
+  ✅  Keycloak 凭据  (~/.pymdi/credentials.json, 用户: ryan.li)
+  ✅  CDI token    (~/.pymdi/pymdi_token.txt, sk-xxxx...abcd)
+  ✅  ESS 网络     可达 (HTTP 200)
+============================================================
+  ✅ 所有检查通过，可以开始查询！</div>
+
+  <table style="margin-top:14px;">
+    <tr><th style="width:8%">#</th><th style="width:18%">检查项</th><th style="width:22%">检测方式</th><th>失败时的修复指引</th></tr>
+    <tr>
+      <td>1</td><td>Python ≥ 3.8</td><td><code>sys.version_info</code></td>
+      <td>提示升级 Python 版本</td>
+    </tr>
+    <tr>
+      <td>2</td><td>requests 库</td><td><code>import requests</code> + 输出版本号</td>
+      <td><code>pip install requests</code></td>
+    </tr>
+    <tr>
+      <td>3</td><td>pybagmining</td><td><code>import pybagmining</code> + 输出版本号</td>
+      <td>提供 Momenta 内部 PyPI 源的完整安装命令</td>
+    </tr>
+    <tr>
+      <td>4</td><td>roslz4 (LZ4解压)</td><td>多层检测：先 import roslz4 → 再尝试 import _roslz4</td>
+      <td>提供 apt-get + pip 双命令修复指引（仅 Linux）</td>
+    </tr>
+    <tr>
+      <td>5</td><td>故障码映射表</td><td>检查 error_code_map.json 是否存在 → 输出记录数</td>
+      <td>⚠️ 警告但不阻断（查询仍可用，仅无故障描述）</td>
+    </tr>
+    <tr>
+      <td>6</td><td>Keycloak 凭据</td><td>检查 ~/.pymdi/credentials.json 或环境变量</td>
+      <td>提供完整的 JSON 模板和写入命令</td>
+    </tr>
+    <tr>
+      <td>7</td><td>CDI Token</td><td>读取 ~/.pymdi/pymdi_token.txt</td>
+      <td>提供 Token 获取页面 URL 和写入路径</td>
+    </tr>
+    <tr>
+      <td>8</td><td>ESS 网络连通性</td><td><code>requests.head('https://ess.momenta.works')</code></td>
+      <td>提示检查内网/VPN 连接</td>
+    </tr>
+  </table>
+
+  <div class="highlight-box" style="margin-top:16px;">
+    <strong>为什么这个机制重要？</strong>大多数内部工具假设「开发者自己知道怎么配环境」。
+    但 Bag Fault Query 的目标用户是<strong>诊断工程师</strong>——他们不关心 pybagmining 还是 roslz4，
+    只想知道「能不能查故障」。<code>--check</code> 把 "it works on my machine" 变成
+    「<strong>任何人都能自助排查的部署清单</strong>」。8 项检查 30 秒跑完，哪项挂了一目了然，不用翻文档不用问人。
+  </div>
+  <div class="page-footer"><span>飞书 AI Agent 系统设计</span><span>5</span></div>
+</div>
+</div>
+
+<!-- ═══════════════ MODULE 05: 工程机制 ═══════════════ -->
+<div class="page page-break">
+  <div class="module-label">MODULE 05</div>
+  <h2>工程特色机制</h2>
+  <p class="lead">
+    以下 10 个机制是在 10 个月生产运行中逐步迭代出来的，它们让系统从「能跑」变成「可靠」。
+  </p>
+
+  <div class="mech-item">
+    <div class="mech-num">1</div>
+    <div class="mech-body">
+      <h4>RSVP 实时追踪 + 拒绝即时通知</h4>
+      <p>创建会议后自动登记到待追踪列表（持久化 JSON），后台每 5 分钟轮询飞书日历 API 检查与会者 RSVP 状态。有人拒绝 → 立刻 DM 通知会议发起人并提示重新安排。事件超过 7 天自动过期清理。</p>
+    </div>
+  </div>
+
+  <div class="mech-item">
+    <div class="mech-num">2</div>
+    <div class="mech-body">
+      <h4>Tiered 群聊摘要调度</h4>
+      <p>50+ 个群不能全量日报（太贵太吵）。按群活跃度分六级：HOT（≤1天）→ 日报；ACTIVE（1-7天）→ 周报；WARM（7-30天）→ 双周报；COOL（30-90天）→ 月报；COLD（90-180天）→ 季报；ZOMBIE（>180天）→ 跳过。摘要发布到飞书 Wiki 并 DM 通知。</p>
+    </div>
+  </div>
+
+  <div class="mech-item">
+    <div class="mech-num">3</div>
+    <div class="mech-body">
+      <h4>跨租户用户智能处理</h4>
+      <p>飞书日历 API 遇到跨公司用户时会静默跳过（不报错）。系统对比「请求添加」vs「API 实际返回」的用户列表，发现差异后强制 Claude 一次性收集所有外部邮箱（而非逐个询问），用邮件方式重新邀请。</p>
+    </div>
+  </div>
+
+  <div class="mech-item">
+    <div class="mech-num">4</div>
+    <div class="mech-body">
+      <h4>SQLite 消息缓存（被踢出群仍可查历史）</h4>
+      <p>所有进入 Bot 的消息实时写入 SQLite，保留 14 天。Bot 被移出群后再重新加入时，摘要功能从本地缓存读取历史，不依赖飞书 API。P2P 对话的 chat_id 映射也持久化到 JSON 文件，跨重启保留。</p>
+    </div>
+  </div>
+
+  <div class="mech-item">
+    <div class="mech-num">5</div>
+    <div class="mech-body">
+      <h4>三层 Token 自动刷新 + 启动预热</h4>
+      <p>Tenant Access Token（提前 60s 续期）、User OAuth Token（过期自动 refresh）、feishu-sync Token（每 90 分钟后台预热）。启动时立即执行一次预热再开启 WebSocket，确保首条消息不因 Token 过期而失败。</p>
+    </div>
+  </div>
+
+  <div class="mech-item">
+    <div class="mech-num">6</div>
+    <div class="mech-body">
+      <h4>非 Owner 权限隔离</h4>
+      <p>群内其他成员 @Bot 时使用独立的精简 System Prompt（仅告知已转告，不暴露工具能力），零工具调用。无法以 Owner 身份执行任何操作。</p>
+    </div>
+  </div>
+
+  <div class="mech-item">
+    <div class="mech-num">7</div>
+    <div class="mech-body">
+      <h4>CPM 周例会预加载</h4>
+      <p>后台每 4 小时搜索最新周例会页面 → 读取前 4000 字摘要 → 缓存。CPM 触发词命中时直接注入 Prompt，零额外延迟即可获取项目最新状态。</p>
+    </div>
+  </div>
+
+  <div class="mech-item">
+    <div class="mech-num">8</div>
+    <div class="mech-body">
+      <h4>用户目录启动预热</h4>
+      <p>FeishuClient 初始化时后台线程全量拉取企业通讯录（~3000 人）并缓存。search_users 后续直接在内存做本地模糊匹配，响应从 3-5 秒降至毫秒级。</p>
+    </div>
+  </div>
+
+  <div class="mech-item">
+    <div class="mech-num">9</div>
+    <div class="mech-body">
+      <h4>撤回消息安全策略</h4>
+      <p>硬编码优先级：先从对话历史中查找已记录的 message_id → 找不到才告知无法撤回。禁止去群聊历史搜索（可能找错消息撤错）。</p>
+    </div>
+  </div>
+
+  <div class="mech-item">
+    <div class="mech-num">10</div>
+    <div class="mech-body">
+      <h4>单实例守护 + CLI 调用串行化</h4>
+      <p>PID 文件锁防止多 Bot 实例并发（共享 Token 被损坏）。feishu-sync-cli 的所有调用经过全局线程锁，防止并发子进程同时读写 Token 文件。</p>
+    </div>
+  </div>
+  <div class="page-footer"><span>飞书 AI Agent 系统设计</span><span>6</span></div>
+</div>
+
+<!-- ═══════════════ MODULE 06: 典型场景 ═══════════════ -->
+<div class="page page-break">
+  <div class="module-label">MODULE 06</div>
+  <h2>典型场景演示</h2>
+
+  <h3>场景一：车辆故障诊断 — 从 VIN 到因果分析报告</h3>
+  <div class="diagram-box">用户: "查 VIN LSVUM40Z6MN123456 昨天有没有故障"
+
+┌─ Agent 内部 ─────────────────────────────┐
+│ 分类: read → Sonnet 4.6 + tools         │
+│ 第1轮: query_bag_fault(                 │
+│          vin="LSVUM40Z6MN123456",       │
+│          time_points="2026-07-15")      │
+│        → ESS 定位 3 个事件               │
+│        → 匹配 230K 故障码表              │
+│        → 输出诊断报告                    │
+└──────────────────────────────────────────┘
+
+Claude 输出的结构化报告:
+┌─────────────────────────────────────────────────┐
+│ # 故障诊断报告                                  │
+│ VIN: LSVUM40Z6MN123456 | 日期: 7月15日          │
+│                                                 │
+│ | 时间 | 故障码 | 受影响功能 | 降级模式 | 严重度 |│
+│ | 08:23 | ESP_FAULT | 车身稳定控制 | 限速80 | ⚠️ │
+│ | 08:23 | CAN_TIMEOUT | 底盘通信 | 无 | ⚡ |     │
+│ | 12:00 | — | — | — | ✅ 无故障 |                │
+│ | 17:45 | CAMERA_OBSTRUCTION | 前视摄像头 | L2++降级L1 | ⚠️ │
+│                                                 │
+│ ## 因果分析                                     │
+│ ESP_FAULT 与 CAN_TIMEOUT 同时出现于 08:23，      │
+│ 底盘通信超时极可能触发了 ESP 的安全降级逻辑。     │
+│                                                 │
+│ 傍晚的 CAMERA_OBSTRUCTION 导致 L2++ 降级为 L1，  │
+│ 建议检查前视摄像头清洁状态和安装角度。            │
+└─────────────────────────────────────────────────┘</div>
+
+  <h3>场景二：项目排期 — 一键生成甘特图</h3>
+  <div class="diagram-box">用户: "帮我生成红旗 P301 的项目二级计划，T0 是 8 月 1 号"
+
+┌─ Agent 内部 ────────────────────────────────────┐
+│ 分类: complex → Sonnet 4.6 + tools              │
+│                                                 │
+│ 第1轮: generate_pm_plan(                        │
+│          project_name="红旗 P301",               │
+│          t0_date="2026-08-01")                  │
+│        → 按标准里程碑编排:                       │
+│          T0 → T+4W(联调) → T+10W(控制匹配)       │
+│          → T+18W(AEB/APA) → T+20W(NOA/压测)     │
+│        → 涵盖 10+ 模块任务线                     │
+│        → 生成 HTML 甘特图 + HD PNG               │
+│        → 自动上传飞书 Drive 和 Wiki              │
+│                                                 │
+│ Claude 输出:                                     │
+│ "✅ 甘特图已生成，包含 5 个里程碑节点、            │
+│  12 个模块、共计 47 项任务。                      │
+│  📎 飞书链接: https://momenta.feishu.cn/..."     │
+└─────────────────────────────────────────────────┘</div>
+
+  <h3>场景三：会议邀约 — 从一句话到 RSVP 追踪</h3>
+  <div class="diagram-box">用户: "帮我约张三、李四明天下午讨论 Q2 规划，一小时"
+
+┌─ Agent 内部 ──────────────────────────────────────────┐
+│ 分类: write → Sonnet 4.6 + tools                       │
+│                                                        │
+│ 第1轮: search_users("张三") → ou_aaa                   │
+│ 第2轮: search_users("李四") → ou_bbb                   │
+│ 第3轮: query_availability([ou_aaa, ou_bbb, ou_owner])  │
+│        → 14:00-15:00 三人皆空闲                         │
+│                                                        │
+│ Claude: "明天14:00-15:00三人皆空闲，需要创建吗？"        │
+│                                                        │
+│ 用户: "好" → 单字检测 → 回退到 write 模式              │
+│                                                        │
+│ 第4轮: create_meeting(title="Q2规划讨论", ...)          │
+│        → 会议创建成功 [event_id=evt_xxx]                │
+│        → 后台登记 RSVP 追踪                              │
+└────────────────────────────────────────────────────────┘
+
+[5分钟后，后台自动]
+RSVP 轮询检测: 张三 needs_action → declined
+→ Bot DM 通知用户: "张三拒绝了会议邀请，需要重新安排吗？"</div>
+
+  <h3>场景四：群内全员会议 — 必选/可选人分离</h3>
+  <div class="diagram-box">用户(@群聊): "@Bot 给群里所有人约周五下午的项目周会"
+
+1. feishu_action(get_group_members) → 8人名单
+2. Claude: "哪些人是必选？其余标记 Optional"
+3. 用户: "张三、李四必需，其他 optional"
+4. query_availability(8人) → 14:00 全空闲
+5. create_meeting(必选=[张三,李四,owner], 可选=[其余5人])</div>
+  <div class="page-footer"><span>飞书 AI Agent 系统设计</span><span>7</span></div>
+</div>
+
+<!-- ═══════════════ MODULE 07: 生产迭代 ═══════════════ -->
+<div class="page page-break">
+  <div class="module-label">MODULE 07</div>
+  <h2>生产运行与迭代</h2>
+  <p class="lead">
+    系统上线 10 个月，从 MVP 到稳定运行。以下记录关键迭代节点——每个节点背后都是一个生产环境踩过的坑。
+  </p>
+
+  <h3>迭代时间线</h3>
+  <div class="timeline-item">
+    <div class="time">2025.04</div>
+    <div class="content"><h4>跨租户用户静默丢弃</h4><p>日历 API 静默跳过跨公司用户 → 实现一致性校验 + attendee_emails 参数。教训：API 不报错不等于成功。</p></div>
+  </div>
+  <div class="timeline-item">
+    <div class="time">2025.05</div>
+    <div class="content"><h4>Haiku 不支持图片 + Token 竞态</h4><p>图片消息路由到 Haiku 导致 API 报错 → 增加图片守卫。feishu-sync 多线程调用损坏 Token → 全局线程锁。</p></div>
+  </div>
+  <div class="timeline-item">
+    <div class="time">2025.06</div>
+    <div class="content"><h4>多实例 + 消息重放</h4><p>Windows 重启后残留进程导致 Token 损坏 → PID 文件锁。WebSocket 重放消息导致重复回复 → message_id 去重集合。</p></div>
+  </div>
+  <div class="timeline-item">
+    <div class="time">2025.07</div>
+    <div class="content"><h4>Claude 幻觉 + 单字误解</h4><p>工具返回成功后 Claude 声称"消息可能没发送"→ 绝对事实规则。单字"好"被判为问候 → 上下文回退路由。</p></div>
+  </div>
+  <div class="timeline-item">
+    <div class="time">2025.08</div>
+    <div class="content"><h4>inspect 完不 edit</h4><p>Claude 只调用 inspect_pptx 就声称"修改完成"→ 强制两步走规则 + 返回结果首行标注"仅查看"。</p></div>
+  </div>
+  <div class="timeline-item">
+    <div class="time">2025.10</div>
+    <div class="content"><h4>Bot 被踢出群 → 无法查历史</h4><p>实现 SQLite 消息缓存，14 天保留，跨重启持久化。Bot 重新入群后摘要从本地读取。</p></div>
+  </div>
+
+  <h3>迭代规律：从"能跑"到"可靠"的三个阶段</h3>
+
+  <table>
+    <tr><th style="width:14%">阶段</th><th style="width:26%">典型问题</th><th>核心教训</th><th style="width:18%">沉淀的设计原则</th></tr>
+    <tr>
+      <td><strong>API 边界期</strong></td>
+      <td>日历静默丢弃跨公司用户<br>feishu-sync 多线程 Token 竞态<br>多实例并发损坏共享文件<br>WebSocket 消息重放</td>
+      <td>外部 API 的失败模式不可假设——不报错不等于成功。第三方 CLI 不是线程安全的。长连接服务必须做进程级互斥。</td>
+      <td>「<strong>一致性校验优先</strong>」：请求了什么 vs 实际得到了什么，永远做 diff<br>「<strong>外部调用串行化</strong>」：任何共享状态的第三方调用必须加锁</td>
+    </tr>
+    <tr>
+      <td><strong>LLM 行为期</strong></td>
+      <td>Haiku 不支持视觉但路由仍分发图片<br>工具成功后 Claude 声称"消息没发送"<br>单字"好"被判为独立问候<br>inspect_pptx 只读操作被当成修改</td>
+      <td>LLM 对"工具已执行但用户没看到"有天然怀疑倾向。Read-only 和 Write 工具的区别对 LLM 不直观。单字意图完全取决于上下文。</td>
+      <td>「<strong>硬约束优于软建议</strong>」：用绝对语句（"禁止""一定"）比委婉语句有效得多<br>「<strong>守卫代码优于模型修复</strong>」：图片→跳过 Haiku，一行 if 解决</td>
+    </tr>
+    <tr>
+      <td><strong>规模化期</strong></td>
+      <td>合并转发消息解析失败<br>Bot 被移出群后无法查历史<br>50+ 群的全量摘要不可持续<br>跨部门用户权限混乱</td>
+      <td>消息类型的枚举不是闭合的——平台会不断加新类型。不要假设 Bot 一直在群里——数据要做本地备份。全量处理不可持续——需要分级调度。</td>
+      <td>「<strong>优雅降级</strong>」：未知消息类型 → 跳过而非崩溃<br>「<strong>本地容灾</strong>」：关键数据 SQLite 实时备份<br>「<strong>Tiered 调度</strong>」：按活跃度/优先级分级</td>
+    </tr>
+  </table>
+
+  <h3>如果重来，会做什么不同</h3>
+  <div class="two-col" style="margin-top:12px;">
+    <div>
+      <h4 style="color:#c0392b;">过度设计的地方</h4>
+      <ul style="font-size:9pt;color:#666;padding-left:1.2cm;">
+        <li><strong>初期就做了 RSVP 轮询</strong>——前 3 个月根本没人创建会议，白跑了 90 天的空轮询。应该等使用数据验证后再加。</li>
+        <li><strong>Tool Use 循环设了 16 轮上限</strong>——实际最多用到 6 轮。过度保守的配置暴露了对 LLM 能力的不信任。</li>
+        <li><strong>用户目录全量预热</strong>——3000 人的企业，首次搜索 3 秒延迟完全可以接受。预热是过早优化。</li>
+      </ul>
+    </div>
+    <div>
+      <h4 style="color:#27ae60;">该做而没做的事</h4>
+      <ul style="font-size:9pt;color:#666;padding-left:1.2cm;">
+        <li><strong>用量仪表盘</strong>——没有统计哪个工具被调用最多、哪个模型路由占比最高。靠感觉判断系统健康度。</li>
+        <li><strong>A/B 测试框架</strong>——每次改 System Prompt 都是全量上线，改完盯着群聊看反馈。应该先灰度 20% 用户。</li>
+        <li><strong>成本归因</strong>——知道总 API 花了多少钱，但不知道每类任务的单价。无法量化"这个 Skill 值不值得继续维护"。</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="highlight-box" style="margin-top:16px;">
+    <strong>一句话</strong>：前期的坑在 API 边界（日历静默丢弃、Token 竞态、多实例），
+    中期的坑在 LLM 行为（幻觉、误解、单字判断），
+    后期的坑在规模化边缘 case（合并转发、被移出群、分级调度）。
+    一个好的 Agent 不是设计出来的，是<strong>用出来的</strong>——但用完之后要<strong>停下来想</strong>，哪些是真正的工程问题，哪些只是过早优化。
+  </div>
+  <div class="page-footer"><span>飞书 AI Agent 系统设计</span><span>8</span></div>
+</div>
+
+<!-- ═══════════════ MODULE 08: 可观测性与质量保障 ═══════════════ -->
+<div class="page page-break">
+  <div class="module-label">MODULE 08</div>
+  <h2>可观测性与质量保障</h2>
+  <p class="lead">
+    以下基于源码审计如实记录——<strong>标注了哪些做了、哪些没做</strong>。坦诚呈现当前工程的完整度，不包装。
+  </p>
+
+  <h3>日志与排障</h3>
+  <table>
+    <tr><th style="width:28%">能力</th><th style="width:12%">状态</th><th>具体实现</th></tr>
+    <tr>
+      <td>分级日志</td>
+      <td><span style="color:#27ae60;font-weight:700;">已实现</span></td>
+      <td>全模块使用 Python <code>logging</code>，五级覆盖（debug/info/warning/error/exception）。关键路径均有日志：消息事件解析、模型路由决策、Tool 调用入口/结果、API 重试与降级、RSVP 状态变更。</td>
+    </tr>
+    <tr>
+      <td>排障信息完整性</td>
+      <td><span style="color:#27ae60;font-weight:700;">已实现</span></td>
+      <td>每条日志附带上下文：消息 ID / 用户 open_id / 工具名 / 参数摘要 / 耗时。Tool Use 循环每轮输出当前轮次和 stop_reason。API 错误时记录 HTTP 状态码和响应体。</td>
+    </tr>
+    <tr>
+      <td>持久化审计轨迹</td>
+      <td><span style="color:#27ae60;font-weight:700;">已实现</span></td>
+      <td>消息缓存（SQLite，14 天保留）、RSVP 追踪（.pending_events.json）、群活跃度（.group_activity.json）、P2P 映射（.p2p_chat_ids.json）— 关键状态全部落盘，重启不丢失。</td>
+    </tr>
+    <tr>
+      <td>集中式日志平台</td>
+      <td><span style="color:#e67e22;font-weight:700;">未实现</span></td>
+      <td>日志仅输出到 stdout，无 ELK/Loki/CloudWatch 接入。依赖服务器本地文件，无法跨实例检索。</td>
+    </tr>
+    <tr>
+      <td>主动告警</td>
+      <td><span style="color:#e67e22;font-weight:700;">未实现</span></td>
+      <td>无可观测性平台（Prometheus/Grafana）。Bot 挂掉/API 故障率飙升时不会自动通知管理员。</td>
+    </tr>
+  </table>
+
+  <h3>错误处理与韧性</h3>
+  <table>
+    <tr><th style="width:28%">场景</th><th style="width:12%">策略</th><th>实现方式</th></tr>
+    <tr>
+      <td>feishu-sync CLI 调用失败</td>
+      <td><span style="color:#27ae60;font-weight:700;">自动重试</span></td>
+      <td>3 次重试，间隔 3 秒。已知静态错误（如页面不存在）跳过重试直接返回，避免无效等待。</td>
+    </tr>
+    <tr>
+      <td>飞书卡片消息发送失败</td>
+      <td><span style="color:#27ae60;font-weight:700;">自动降级</span></td>
+      <td>卡片渲染失败 → 自动降级为纯文本回复。用户仍能收到消息，只是格式受损。</td>
+    </tr>
+    <tr>
+      <td>Wiki 页面读取失败</td>
+      <td><span style="color:#27ae60;font-weight:700;">Fallback 链</span></td>
+      <td>read_page_as_markdown 失败 → 自动切换为 download_and_parse_wiki_file，尝试直接下载解析。</td>
+    </tr>
+    <tr>
+      <td>群消息读取权限不足</td>
+      <td><span style="color:#27ae60;font-weight:700;">三级降级</span></td>
+      <td>Bot Token → 用户 IM Token → 本地 SQLite 缓存。任一失败自动尝试下一级，确保尽可能返回数据。</td>
+    </tr>
+    <tr>
+      <td>PPT/Drive 上传失败</td>
+      <td><span style="color:#27ae60;font-weight:700;">非阻断</span></td>
+      <td>文件上传失败不影响本地保存和 Bot 回复。"上传失败"单独标注，不阻塞主流程。</td>
+    </tr>
+    <tr>
+      <td>Tool Use 循环超限</td>
+      <td><span style="color:#27ae60;font-weight:700;">友好终止</span></td>
+      <td>超过 16 轮返回明确提示："操作超过最大步骤限制，请简化请求后重试"。不静默失败。</td>
+    </tr>
+    <tr>
+      <td>max_tokens 截断</td>
+      <td><span style="color:#27ae60;font-weight:700;">部分返回</span></td>
+      <td>返回已生成的 partial 内容 + 警告："回复被截断，任务未完成。请简化请求"。</td>
+    </tr>
+  </table>
+
+  <h3>安全与权限</h3>
+  <table>
+    <tr><th style="width:28%">能力</th><th style="width:12%">状态</th><th>具体实现</th></tr>
+    <tr>
+      <td>非 Owner 权限隔离</td>
+      <td><span style="color:#27ae60;font-weight:700;">已实现</span></td>
+      <td>群内其他成员 @Bot 时使用独立 System Prompt（仅告知已转告），零工具暴露，无法以 Owner 身份执行任何操作。</td>
+    </tr>
+    <tr>
+      <td>消息传输加密</td>
+      <td><span style="color:#27ae60;font-weight:700;">已实现</span></td>
+      <td>飞书 WebSocket 推送的加密消息（AES）在 bot.py 中自动解密。</td>
+    </tr>
+    <tr>
+      <td>Token 安全管理</td>
+      <td><span style="color:#27ae60;font-weight:700;">已实现</span></td>
+      <td>三层 Token 自动刷新（Tenant/User/feishu-sync）。凭据存储在本地文件中，不硬编码。</td>
+    </tr>
+    <tr>
+      <td>单实例互斥</td>
+      <td><span style="color:#27ae60;font-weight:700;">已实现</span></td>
+      <td>PID 文件锁（SIGTERM → SIGKILL 级联终止），防止多实例 Token 竞态。</td>
+    </tr>
+    <tr>
+      <td>操作审计日志</td>
+      <td><span style="color:#e67e22;font-weight:700;">未实现</span></td>
+      <td>无结构化审计日志。谁在什么时间通过 Bot 执行了什么操作——无法事后追溯。</td>
+    </tr>
+    <tr>
+      <td>车辆数据脱敏</td>
+      <td><span style="color:#e67e22;font-weight:700;">未实现</span></td>
+      <td>故障诊断返回的 VIN、Bag 元数据、故障报告不做脱敏处理。日志和 SQLite 缓存中可能包含车辆信息。</td>
+    </tr>
+  </table>
+
+  <div class="page-footer"><span>飞书 AI Agent 系统设计</span><span>9</span></div>
+</div>
+
+<!-- ═══════════════ MODULE 09: 部署与运维 ═══════════════ -->
+<div class="page page-break">
+  <div class="module-label">MODULE 09</div>
+  <h2>部署与运维</h2>
+
+  <h3>当前部署形态</h3>
+  <table>
+    <tr><th style="width:22%">维度</th><th>现状</th><th style="width:18%">是否存在短板</th></tr>
+    <tr>
+      <td>运行环境</td>
+      <td>Windows 服务器，单进程 Python 脚本。通过 <code>python main_ws.py</code> 启动。</td>
+      <td><span style="color:#e67e22;">—</span></td>
+    </tr>
+    <tr>
+      <td>进程守护</td>
+      <td>PID 文件锁 + atexit 清理。启动时自动杀死旧实例。</td>
+      <td><span style="color:#27ae60;">够用</span></td>
+    </tr>
+    <tr>
+      <td>配置管理</td>
+      <td>.env 文件（FEISHU_APP_ID / SECRET / ANTHROPIC_API_KEY 等）。</td>
+      <td><span style="color:#27ae60;">够用</span></td>
+    </tr>
+    <tr>
+      <td>启动逻辑</td>
+      <td>先 Token 预热 + CPM 预加载 → 再启动 WebSocket → 再启动调度器（RSVP/日报/Token 刷新）。</td>
+      <td><span style="color:#27ae60;">合理</span></td>
+    </tr>
+    <tr>
+      <td>高可用</td>
+      <td><strong>无</strong>。单实例运行，进程挂了 Bot 完全不可用。无自动重启、无双活、无健康检查。</td>
+      <td><span style="color:#c0392b;font-weight:700;">关键短板</span></td>
+    </tr>
+    <tr>
+      <td>容器化</td>
+      <td><strong>无</strong>。无 Dockerfile，无 docker-compose，无 K8s 配置。</td>
+      <td><span style="color:#e67e22;">—</span></td>
+    </tr>
+    <tr>
+      <td>CI/CD</td>
+      <td><strong>无</strong>。代码更新 = 手动 git pull + 手动重启进程。</td>
+      <td><span style="color:#c0392b;font-weight:700;">关键短板</span></td>
+    </tr>
+    <tr>
+      <td>灰度发布</td>
+      <td><strong>无</strong>。System Prompt 改动全量上线，无法先灰度 20% 用户验证。</td>
+      <td><span style="color:#c0392b;font-weight:700;">关键短板</span></td>
+    </tr>
+    <tr>
+      <td>容量规划</td>
+      <td><strong>未做</strong>。50 人已验证可用，扩展到 500 人的瓶颈（WebSocket 连接数 / API 并发 / SQLite 锁）未评估。</td>
+      <td><span style="color:#e67e22;">—</span></td>
+    </tr>
+  </table>
+
+  <h3>测试策略</h3>
+  <table>
+    <tr><th style="width:22%">测试类型</th><th>现状</th></tr>
+    <tr>
+      <td>单元测试</td>
+      <td><span style="color:#c0392b;font-weight:700;">无</span> — 项目中不存在任何 test_*.py 或 *_test.py 文件，未使用 pytest/unittest。</td>
+    </tr>
+    <tr>
+      <td>集成测试</td>
+      <td><span style="color:#c0392b;font-weight:700;">无</span> — 未编写 mock 飞书 API / mock Claude API 的测试用例。</td>
+    </tr>
+    <tr>
+      <td>Prompt 回归评测</td>
+      <td><span style="color:#c0392b;font-weight:700;">无</span> — 无评测集（eval dataset），无法自动化验证 Prompt 改动是否引入退化。当前靠人工观察群聊反馈。</td>
+    </tr>
+    <tr>
+      <td>端到端验收</td>
+      <td><span style="color:#27ae60;font-weight:700;">人工</span> — 修改后手动在飞书中发消息测试，覆盖典型场景（会议/搜索/故障查询）。</td>
+    </tr>
+  </table>
+
+  <h3>已知风险与缓解的差距</h3>
+  <table>
+    <tr><th style="width:22%">风险</th><th style="width:18%">概率</th><th>当前缓解措施</th><th>缺失措施</th></tr>
+    <tr>
+      <td>Bot 进程崩溃</td>
+      <td>低（10 个月仅发生 2 次）</td>
+      <td>无自动重启。依赖同事发现 Bot 不回复后手动通知管理员。</td>
+      <td>systemd/supervisor 守护；健康检查端点 + 自动重启</td>
+    </tr>
+    <tr>
+      <td>Claude API 限流/故障</td>
+      <td>中（Claude 偶尔 429）</td>
+      <td>无。当前依赖 Anthropic SDK 内置重试。</td>
+      <td>本地队列缓冲；降级为静态回复</td>
+    </tr>
+    <tr>
+      <td>Prompt 改动引入退化</td>
+      <td>高（每次改 System Prompt 都是全量上线）</td>
+      <td>人工观察群聊反馈，发现问题后快速回滚（手动 git revert + 重启）。</td>
+      <td>Prompt 评测集 + A/B 灰度框架</td>
+    </tr>
+    <tr>
+      <td>SQLite 文件损坏</td>
+      <td>极低</td>
+      <td>无备份。损坏后果：消息缓存丢失，Bot 被踢出群后摘要功能暂时不可用。</td>
+      <td>定期备份；损坏检测 + 自动重建</td>
+    </tr>
+  </table>
+  <div class="page-footer"><span>飞书 AI Agent 系统设计</span><span>10</span></div>
+</div>
+
+<!-- ═══════════════ MODULE 10: 后续改进方向 ═══════════════ -->
+<div class="page page-break">
+  <div class="module-label">MODULE 10</div>
+  <h2>后续改进方向</h2>
+  <p class="lead">
+    基于 MODULE 08-09 审计出的短板，以下提出<strong>可落地的改进方案</strong>。按优先级分三档：
+    P0（系统可靠性底线）、P1（工程化成熟度）、P2（规模化支撑）。
+  </p>
+
+  <h3>P0 · 可靠性底线</h3>
+  <table>
+    <tr><th style="width:22%">改进项</th><th style="width:12%">投入</th><th>方案</th></tr>
+    <tr>
+      <td><strong>进程自动守护</strong></td>
+      <td>低（30 分钟）</td>
+      <td>Windows 上使用 <code>nssm</code>（Non-Sucking Service Manager）将 <code>python main_ws.py</code> 注册为系统服务，崩溃自动重启。Linux 上用 systemd <code>Restart=always</code>。无需改代码。</td>
+    </tr>
+    <tr>
+      <td><strong>健康检查端点</strong></td>
+      <td>低（1 小时）</td>
+      <td>在 main_ws.py 中加一个 HTTP server（<code>http.server</code> 标准库），监听本地端口，返回 <code>{"status":"ok","uptime":...}</code>。配合 nssm/systemd 做健康检查，挂了自动拉起来。</td>
+    </tr>
+    <tr>
+      <td><strong>日志持久化 + 轮转</strong></td>
+      <td>低（30 分钟）</td>
+      <td>将 stdout 日志改为 <code>logging.handlers.RotatingFileHandler</code>，保留最近 7 天、单文件 50MB。不在终端里 grep 历史日志。</td>
+    </tr>
+    <tr>
+      <td><strong>关键指标埋点</strong></td>
+      <td>中（2 小时）</td>
+      <td>不引入 Prometheus。在 ToolExecutor.execute() 入口/出口打点，输出到独立 metrics.log：<code>{ts, tool, duration_ms, status}</code>。每天跑个 Python 脚本统计各工具调用量、失败率、P95 延迟。够用。</td>
+    </tr>
+  </table>
+
+  <h3>P1 · 工程化成熟度</h3>
+  <table>
+    <tr><th style="width:22%">改进项</th><th style="width:12%">投入</th><th>方案</th></tr>
+    <tr>
+      <td><strong>Prompt 评测集</strong></td>
+      <td>中（1 天）</td>
+      <td>从历史日志中提取 50 条真实消息 + 预期行为（该调哪个工具 / 该走哪个路由分类 / 该拒绝还是执行）。每次改 System Prompt 后跑一遍，diff 行为差异。<br>格式：<code>{"input":"帮我约张三","expected_route":"write","expected_tools":["search_users"],"forbidden_tools":[]}</code><br>不需要训练模型，正则 match 工具名 + 路由分类即可打分。</td>
+    </tr>
+    <tr>
+      <td><strong>A/B 灰度框架</strong></td>
+      <td>中（半天）</td>
+      <td>在 assistant.py 的 process() 入口加一个按 open_id 取模的分流逻辑：<code>hash(open_id) % 100 &lt; 20</code> → 走新版 Prompt，其余走旧版。对比两组的关键指标（工具调用成功率、用户"重试"频率）。20% 灰度 + 对比一周后全量。</td>
+    </tr>
+    <tr>
+      <td><strong>Docker 化</strong></td>
+      <td>低（1 小时）</td>
+      <td>写一个 <code>Dockerfile</code>（FROM python:3.9-slim + COPY + pip install + CMD）。Windows 上跑 Linux 容器需要 WSL2，或者直接在 Linux 服务器上 build。目的是让环境可复现、部署可一键。</td>
+    </tr>
+    <tr>
+      <td><strong>代码 Hook 的单元测试</strong></td>
+      <td>中（半天）</td>
+      <td>优先覆盖：<code>_classify_request()</code>（路由分类，输入输出明确，最值得测）、<code>tool_input → JSON Schema</code> 校验（参数缺失/类型错误场景）、Token 刷新逻辑（过期边界）。用 pytest + unittest.mock 替换 requests 调用。不追求覆盖率，覆盖核心逻辑即可。</td>
+    </tr>
+    <tr>
+      <td><strong>操作审计日志</strong></td>
+      <td>低（1 小时）</td>
+      <td>在 ToolExecutor.execute() 中追加一条结构化日志到 audit.log：<code>{ts, user_open_id, tool, params_summary, result_summary}</code>。不存完整参数（避免敏感数据），只存摘要。用于事后追溯"谁在什么时间做了什么操作"。</td>
+    </tr>
+  </table>
+
+  <h3>P2 · 规模化支撑</h3>
+  <table>
+    <tr><th style="width:22%">改进项</th><th style="width:12%">投入</th><th>方案</th></tr>
+    <tr>
+      <td><strong>容量评估 + 瓶颈突破</strong></td>
+      <td>中（1 天）</td>
+      <td>50 人的瓶颈在 Claude API 并发（Anthropic 默认 RPM 限制），不在 WebSocket。扩展到 500 人需要：① 消息队列（内存 queue.Queue 缓冲峰值）；② API 并发控制（asyncio.Semaphore 限流）；③ SQLite → PostgreSQL（写并发超过 SQLite 单写锁极限时需要）。先做压测确认瓶颈再动手。</td>
+    </tr>
+    <tr>
+      <td><strong>VIN 数据脱敏</strong></td>
+      <td>低（30 分钟）</td>
+      <td>在日志和 SQLite 写入前对 VIN 做截断（只保留前 11 位，后 6 位替换为 <code>******</code>），故障码和诊断结论不脱敏（不含 PII）。17 位 VIN 前 11 位是 WMI+VDS（厂牌+车型），后 6 位是序列号（可关联到车主），只需遮后 6 位。</td>
+    </tr>
+    <tr>
+      <td><strong>成本归因仪表</strong></td>
+      <td>低（1 小时）</td>
+      <td>在每个 Tool Use 轮次记录 token 消耗（从 Claude API response 的 usage 字段提取），按工具名/skill 归类。不建仪表盘，导出 CSV 用 Excel 做透视表——知道"故障诊断"和"会议邀约"各花了多少钱，才能判断哪个 Skill 值得继续优化 Prompt 压缩 token。</td>
+    </tr>
+    <tr>
+      <td><strong>多 Bot 实例 + 消息路由</strong></td>
+      <td>高（3 天）</td>
+      <td>当单实例瓶颈到达时（WebSocket 单连接上限 ~5000 事件/秒，当前远未触及），拆分 Bot：一个处理办公场景（会议/文档/群管理），一个处理诊断场景（故障码/Bag/国标），通过飞书事件订阅的规则过滤分流到不同 WebSocket URL。各自独立部署，故障隔离。</td>
+    </tr>
+  </table>
+
+  <h3>优先级路线图</h3>
+  <div class="diagram-box" style="font-size:9pt;line-height:2;">第 1 周（P0 全部 + P1 部分）:
+  进程守护(nssm) + 健康检查端点 + 日志轮转 + 审计日志
+  → Bot 挂了能自己起来，出问题有日志可查，操作有审计轨迹
+
+第 2 周（P1 剩余）:
+  Prompt 评测集(50条) + 路由分类单元测试 + Dockerfile
+  → 改 Prompt 有底气，部署可复现
+
+第 3-4 周（P2 选做）:
+  VIN 脱敏 + 成本归因 + 关键指标埋点
+  → 安全合规基本达标，ROI 可量化
+
+按需（用户量驱动）:
+  容量压测 → 消息队列 → 多实例拆分</div>
+  <div class="page-footer"><span>飞书 AI Agent 系统设计</span><span>11</span></div>
+</div>
+
+<!-- ═══════════════ MODULE 11: 技术栈与总结 ═══════════════ -->
+<div class="page">
+  <div class="module-label">MODULE 11</div>
+  <h2>技术栈与总结</h2>
+
+  <div class="two-col">
+    <div>
+      <h3>技术栈</h3>
+      <table>
+        <tr><th style="width:35%">层级</th><th>技术选型</th></tr>
+        <tr><td>语言</td><td>Python 3.9+</td></tr>
+        <tr><td>AI 引擎</td><td>Claude API (Opus/Sonnet/Haiku)</td></tr>
+        <tr><td>通信</td><td>WebSocket (lark_oapi)</td></tr>
+        <tr><td>平台</td><td>飞书开放平台（消息/日历/文档/项目/Wiki/云盘）</td></tr>
+        <tr><td>外部系统</td><td>ESS（车辆数据）、Mviz（可视化）、FMP（车辆管理）</td></tr>
+        <tr><td>存储</td><td>SQLite（消息缓存）、JSON（配置持久化）</td></tr>
+        <tr><td>任务调度</td><td>APScheduler（RSVP/日报/Token预热）</td></tr>
+        <tr><td>部署</td><td>Windows 服务器，单进程 WebSocket 长连接</td></tr>
+      </table>
+    </div>
+    <div>
+      <h3>工具模块一览</h3>
+      <div class="tag-row">
+        <span class="tag-item">search_users</span>
+        <span class="tag-item">create_meeting</span>
+        <span class="tag-item">query_availability</span>
+        <span class="tag-item">cancel_meeting</span>
+        <span class="tag-item">feishu_action</span>
+        <span class="tag-item">generate_ppt</span>
+        <span class="tag-item">bag_analysis</span>
+        <span class="tag-item">feishu_project</span>
+        <span class="tag-item">search_gb_standard</span>
+        <span class="tag-item">find_skills</span>
+        <span class="tag-item">generate_pm_plan</span>
+        <span class="tag-item">book_vehicle</span>
+        <span class="tag-item">check_fmp_vehicles</span>
+        <span class="tag-item">query_bag_fault</span>
+        <span class="tag-item">send_image</span>
+        <span class="tag-item">generate_diagram</span>
+        <span class="tag-item">run_code</span>
+      </div>
+      <h3 style="margin-top:16px;">Skill 能力矩阵</h3>
+      <table>
+        <tr><th>Skill</th><th>工具数</th><th>类型</th></tr>
+        <tr><td>Bag Fault Query</td><td>4 步工作流</td><td>Prompt + 源码</td></tr>
+        <tr><td>CPM Assistant</td><td>—</td><td>纯 Prompt</td></tr>
+        <tr><td>Personal Assistant</td><td>14 种能力</td><td>Prompt + 源码</td></tr>
+        <tr><td>Project Bot CS</td><td>14 项工具</td><td>Prompt + 源码</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <h3 style="margin-top:24px;">设计哲学</h3>
+  <div class="principle-grid">
+    <div class="principle-card">
+      <div class="icon">📝</div>
+      <h4>Prompt 是代码</h4>
+      <p>SKILL.md 与 run_tool.py 同等重要。Prompt 定义行为边界，代码实现执行逻辑。两者分离、各自迭代。</p>
+    </div>
+    <div class="principle-card">
+      <div class="icon">🔧</div>
+      <h4>工具是接口</h4>
+      <p>Tool Schema 的 description 即 API 文档——Claude 不看代码只看描述。写 description 花的时间比写实现多。</p>
+    </div>
+    <div class="principle-card">
+      <div class="icon">🔄</div>
+      <h4>规则是迭代出来的</h4>
+      <p>19 条 System Prompt 格式规则没有一条是凭空设计的——每条对应一个生产环境中 Claude 的"坏习惯"。</p>
+    </div>
+  </div>
+
+  <div class="highlight-box" style="margin-top:24px;">
+    <strong>一句话总结</strong>：这个 Agent 系统的价值不在于"用了 Claude API + 飞书 SDK"，而在于
+    <strong>10 个月持续迭代中积累的工程判断</strong>——什么时候该用规则而不是模型、什么时候该加锁而不是改代码、
+    什么时候该在 Prompt 里加一条硬约束而不是期望 LLM 自己理解。这些细节决定了 Agent 是「Demo」还是「生产可用」。
+  </div>
+</div>
+
+</body>
+</html>
