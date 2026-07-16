@@ -2,7 +2,7 @@
 
 > **一个基于 LLM 的模块化企业办公 Agent 框架**
 >
-> 设计者：李金林（Ryan Li） | 开发周期：2025.03 — 2026.04 | Claude Code + Python + 飞书开放平台
+> 设计者：李金林（Ryan Li） | 开发周期：2026.03 — 至今 | Claude Code + Python + 飞书开放平台
 
 ---
 
